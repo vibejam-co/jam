@@ -111,9 +111,11 @@ const App: React.FC = () => {
       setLoadError(null);
     } catch (error) {
       // Fallback to local state to avoid a dead-end UX when backend is unavailable.
-      const nextRank = (apps.length + 1).toString().padStart(2, '0');
-      const appWithRank = { ...newApp, rank: nextRank };
-      setApps([appWithRank, ...apps]);
+      setApps((prev) => {
+        const nextRank = (prev.length + 1).toString().padStart(2, '0');
+        const appWithRank = { ...newApp, rank: nextRank };
+        return [appWithRank, ...prev];
+      });
       setLoadError(error instanceof Error ? error.message : 'Publish failed on backend; saved locally only.');
     } finally {
       setIsPublishing(false);
