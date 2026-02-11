@@ -1,4 +1,10 @@
-import type { CanvasOnboardingPayload, Notification, VibeApp } from '../types';
+import type {
+  CanvasCatalogResponse,
+  CanvasOnboardingPayload,
+  CanvasPublishResult,
+  Notification,
+  VibeApp,
+} from '../types';
 
 type ApiResponse<T> = {
   data: T;
@@ -15,11 +21,22 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
     },
   });
 
-  const payload = (await response.json()) as ApiResponse<T>;
+  const contentType = response.headers.get('content-type') ?? '';
+  const isJson = contentType.includes('application/json');
+  const rawBody = await response.text();
+  const payload = (isJson && rawBody ? (JSON.parse(rawBody) as ApiResponse<T>) : null);
 
   if (!response.ok) {
-    const message = payload?.details || payload?.error || `Request failed: ${response.status}`;
+    const message =
+      payload?.details ||
+      payload?.error ||
+      (rawBody ? rawBody.slice(0, 160) : '') ||
+      `Request failed: ${response.status}`;
     throw new Error(message);
+  }
+
+  if (!payload) {
+    throw new Error(`Expected JSON response from ${path}, received ${contentType || 'unknown content-type'}.`);
   }
 
   return payload.data;
@@ -42,7 +59,9 @@ export const subscribeToNewsletter = (email: string) =>
   });
 
 export const saveCanvasOnboarding = (payload: CanvasOnboardingPayload) =>
-  request<{ success: boolean }>('/api/canvas', {
+  request<CanvasPublishResult>('/api/canvas', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+
+export const fetchCanvasCatalog = () => request<CanvasCatalogResponse>('/api/canvas');

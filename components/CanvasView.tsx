@@ -1,6 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
 import { 
   Sparkles, 
   LayoutTemplate, 
@@ -22,71 +23,72 @@ import {
   CreditCard
 } from 'lucide-react';
 import CanvasOnboarding from './CanvasOnboarding';
-import { saveCanvasOnboarding } from '../lib/api';
+import EditorialKineticPreviewShell from './editorialKinetic/EditorialKineticPreviewShell';
+import MidnightZenithPreviewShell from './midnightZenith/MidnightZenithPreviewShell';
+import CreatorHubPreviewShell from './creatorHub/CreatorHubPreviewShell';
+import EtherealLiquidPreviewShell from './etherealLiquid/EtherealLiquidPreviewShell';
+import GlassArtifactPreviewShell from './glassArtifact/GlassArtifactPreviewShell';
+import GoldStandardCollectionPreviewShell from './collection/GoldStandardCollectionPreviewShell';
+import AccordionDeckCollectionPreviewShell from './collection/AccordionDeckCollectionPreviewShell';
+import CollageOsCollectionPreviewShell from './collection/CollageOsCollectionPreviewShell';
+import TerrariumCollectionPreviewShell from './collection/TerrariumCollectionPreviewShell';
+import PrismOsCollectionPreviewShell from './collection/PrismOsCollectionPreviewShell';
+import AeroCanvasCollectionPreviewShell from './collection/AeroCanvasCollectionPreviewShell';
+import { fetchCanvasCatalog, saveCanvasOnboarding } from '../lib/api';
+import type { CanvasCatalogResponse, CanvasPublishResult, CanvasTemplate, CanvasTheme } from '../types';
 
-const THEMES = [
-  {
-    id: 'aurora',
-    name: 'Aurora Crystal Bento',
-    desc: 'Glassy, glowing, futuristic',
-    previewColor: 'from-cyan-500/20 via-blue-500/10 to-transparent',
-    accent: 'cyan-400',
-    icon: '✨'
-  },
-  {
-    id: 'editorial',
-    name: 'Editorial Pop Poster',
-    desc: 'Bold typography, creative confidence',
-    previewColor: 'from-yellow-500/20 via-orange-500/10 to-transparent',
-    accent: 'yellow-400',
-    icon: '🗞️'
-  },
-  {
-    id: 'neon',
-    name: 'Neon Artifact Night',
-    desc: 'Dark, cinematic, late-night energy',
-    previewColor: 'from-purple-500/20 via-pink-500/10 to-transparent',
-    accent: 'purple-500',
-    icon: '🌙'
-  },
-  {
-    id: 'luxe',
-    name: 'Soft Luxe Storefront',
-    desc: 'Warm, cozy, conversion-friendly',
-    previewColor: 'from-rose-500/20 via-stone-500/10 to-transparent',
-    accent: 'rose-400',
-    icon: '🧸'
-  },
-  {
-    id: 'sonic',
-    name: 'Sonic Gradient Stage',
-    desc: 'Music-first, immersive, rhythmic',
-    previewColor: 'from-green-500/20 via-emerald-500/10 to-transparent',
-    accent: 'green-400',
-    icon: '🎵'
-  }
+const FALLBACK_THEME_COLOR_CLASSES = [
+  'from-cyan-500/20 via-blue-500/10 to-transparent',
+  'from-yellow-500/20 via-orange-500/10 to-transparent',
+  'from-purple-500/20 via-pink-500/10 to-transparent',
+  'from-rose-500/20 via-stone-500/10 to-transparent',
+  'from-green-500/20 via-emerald-500/10 to-transparent',
 ];
 
-const TEMPLATES = [
-  { name: 'Indie Page', type: 'Solopreneur', author: 'Marc Lou', color: 'bg-[#2D3139]' },
-  { name: 'Editorial Kinetic', type: 'Fashion', author: 'Mikel Janssen', color: 'bg-[#F2D022]' },
-  { name: 'Collage OS', type: 'Creative', author: 'MSCHF Style', color: 'bg-[#E5E1D5]' },
-  { name: 'Terrarium', type: 'Nature', author: 'Botanist', color: 'bg-[#FDF6E3]' },
-  { name: 'Prism OS', type: 'Refractive', author: 'Alex DRV', color: 'bg-[#0F1115]' },
-  { name: 'Aero Spatial', type: 'Desk', author: 'Alex Vibe', color: 'bg-[#FAFAFA]' },
-];
+const FALLBACK_THEME_ICONS = ['✨', '🗞️', '🌙', '🧸', '🎵', '⚡', '🧠', '📈'];
+
+const THEME_DISPLAY_OVERRIDES: Record<string, { name?: string; desc?: string }> = {
+  'concrete-vibe': {
+    name: 'Creator Hub',
+    desc: 'Warm, human storefront built for trust and conversion.',
+  },
+  'aurora-bento': {
+    name: 'Ethereal Liquid',
+    desc: 'High-refraction liquid glass with floating bento cards.',
+  },
+};
+
+const normalizeSlug = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\/(www\.)?vibejam\.co\//, '')
+    .replace(/^vibejam\.co\//, '')
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48);
+
+type CanvasThemePreview = CanvasTheme & {
+  previewColor: string;
+  icon: string;
+};
 
 /**
  * Aurora Crystal Bento Preview Component
  * Epic design implementation based on the provided creative brief.
  */
-const AuroraCrystalBentoPreview: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+const AuroraCrystalBentoPreview: React.FC<{
+  theme: CanvasThemePreview;
+  onClose: () => void;
+  onUseTheme: () => void;
+}> = ({ theme, onClose, onUseTheme }) => {
   return (
     <motion.div 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[60] bg-[#020408] overflow-hidden flex flex-col font-sans selection:bg-cyan-500/30"
+      className="fixed inset-0 z-[300] w-screen h-[100dvh] bg-[#020408] overflow-hidden flex flex-col font-sans selection:bg-cyan-500/30"
     >
       {/* 1) ATMOSPHERE: DRFTING AURORA GRADIENT */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -105,8 +107,8 @@ const AuroraCrystalBentoPreview: React.FC<{ onClose: () => void }> = ({ onClose 
       {/* TOP NAV OVERLAY (Minimal) */}
       <div className="relative z-20 flex justify-between items-center px-6 py-6 lg:px-12">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 shadow-[0_0_20px_rgba(6,182,212,0.4)]" />
-          <span className="text-white font-bold tracking-tighter text-lg uppercase">Aurora</span>
+          <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${theme.previewColor} shadow-[0_0_20px_rgba(255,255,255,0.2)]`} />
+          <span className="text-white font-bold tracking-tighter text-lg uppercase">{theme.name}</span>
         </div>
         <button 
           onClick={onClose}
@@ -132,14 +134,14 @@ const AuroraCrystalBentoPreview: React.FC<{ onClose: () => void }> = ({ onClose 
               <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/5 via-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
               
               <div className="relative z-10">
-                <div className="w-24 h-24 rounded-full border-2 border-cyan-400/30 p-1 mb-8">
-                  <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Alex" alt="Avatar" className="w-full h-full rounded-full object-cover shadow-2xl" />
+                <div className="w-24 h-24 rounded-full border-2 border-white/30 p-1 mb-8 bg-white/5 flex items-center justify-center text-4xl">
+                  {theme.icon}
                 </div>
-                <h1 className="text-4xl font-extrabold text-white tracking-tighter mb-2 leading-none">Alex Rivera</h1>
-                <p className="text-cyan-400 font-medium tracking-wide text-sm uppercase mb-8">Digital Artisan & Explorer</p>
+                <h1 className="text-4xl font-extrabold text-white tracking-tighter mb-2 leading-none">{theme.name}</h1>
+                <p className="text-cyan-300 font-medium tracking-wide text-sm uppercase mb-8">Premium Canvas Preview</p>
                 
                 <p className="text-zinc-400 text-lg leading-relaxed mb-10">
-                  Crafting high-fidelity digital diamonds from a sunny studio in the void. Shipping weekly.
+                  {theme.desc}
                 </p>
 
                 <div className="space-y-4">
@@ -151,8 +153,8 @@ const AuroraCrystalBentoPreview: React.FC<{ onClose: () => void }> = ({ onClose 
 
                 {/* DESKTOP ACQUIRE BUTTON PLACEMENT */}
                 <div className="hidden lg:block mt-12">
-                   <button className="w-full h-16 rounded-full bg-white/5 border border-white/20 backdrop-blur-xl text-white font-black uppercase tracking-widest relative overflow-hidden group shadow-2xl transition-all hover:scale-[1.02] active:scale-[0.98]">
-                      <span className="relative z-10">Acquire Theme</span>
+                   <button onClick={onUseTheme} className="w-full h-16 rounded-full bg-white/5 border border-white/20 backdrop-blur-xl text-white font-black uppercase tracking-widest relative overflow-hidden group shadow-2xl transition-all hover:scale-[1.02] active:scale-[0.98]">
+                      <span className="relative z-10">Use This Vibe</span>
                       {/* Sheen Animation */}
                       <motion.div 
                         animate={{ x: ['-200%', '200%'] }}
@@ -182,13 +184,18 @@ const AuroraCrystalBentoPreview: React.FC<{ onClose: () => void }> = ({ onClose 
               </div>
               <div>
                 <span className="px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-[10px] text-cyan-400 font-black tracking-widest uppercase mb-4 inline-block">Featured</span>
-                <h3 className="text-3xl font-bold text-white tracking-tight mb-2">Luminal Cognitive V3</h3>
-                <p className="text-zinc-400 max-w-sm">The world's first localized design agent powered by proof-of-iteration.</p>
+                <h3 className="text-3xl font-bold text-white tracking-tight mb-2">{theme.name}</h3>
+                <p className="text-zinc-400 max-w-sm">{theme.desc}</p>
               </div>
               <div className="flex items-center gap-2 text-white font-black text-xs uppercase tracking-widest group-hover:gap-4 transition-all">
-                Explore Project <ArrowRight className="w-4 h-4" />
+                Preview Layout <ArrowRight className="w-4 h-4" />
               </div>
               <div className="absolute -bottom-10 -right-10 w-64 h-64 bg-cyan-500/10 blur-[80px] rounded-full" />
+              <img
+                src={theme.previewImg}
+                alt={`${theme.name} preview`}
+                className="absolute inset-0 -z-10 w-full h-full object-cover opacity-20 pointer-events-none"
+              />
             </motion.div>
 
             {/* SMALL BOX: STATS */}
@@ -288,8 +295,8 @@ const AuroraCrystalBentoPreview: React.FC<{ onClose: () => void }> = ({ onClose 
 
       {/* MOBILE FLOATING ACQUIRE BUTTON */}
       <div className="lg:hidden fixed bottom-8 left-1/2 -translate-x-1/2 z-50 w-full px-6">
-         <button className="w-full h-16 rounded-full bg-white/5 border border-white/20 backdrop-blur-2xl text-white font-black uppercase tracking-widest relative overflow-hidden shadow-2xl active:scale-95 transition-transform flex items-center justify-center gap-3">
-            Acquire Theme
+         <button onClick={onUseTheme} className="w-full h-16 rounded-full bg-white/5 border border-white/20 backdrop-blur-2xl text-white font-black uppercase tracking-widest relative overflow-hidden shadow-2xl active:scale-95 transition-transform flex items-center justify-center gap-3">
+            Use This Vibe
             <motion.div 
               animate={{ x: ['-200%', '200%'] }}
               transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
@@ -302,12 +309,320 @@ const AuroraCrystalBentoPreview: React.FC<{ onClose: () => void }> = ({ onClose 
   );
 };
 
+const CollectionTemplatePreview: React.FC<{
+  template: CanvasTemplate;
+  onClose: () => void;
+  onUseTemplate: () => void;
+}> = ({ template, onClose, onUseTemplate }) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[300] w-screen h-[100dvh] bg-[#020408] overflow-hidden flex flex-col font-sans selection:bg-cyan-500/30"
+    >
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.08),transparent_50%),radial-gradient(circle_at_80%_80%,rgba(56,189,248,0.08),transparent_55%)]" />
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03] contrast-150 brightness-150" />
+      </div>
+
+      <div className="relative z-20 flex justify-between items-center px-6 py-6 lg:px-12 border-b border-white/10 bg-black/30 backdrop-blur-xl">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">The Collection Preview</p>
+          <h3 className="text-2xl font-extrabold tracking-tight text-white mt-1">{template.name}</h3>
+          <p className="text-xs text-zinc-400 font-semibold uppercase tracking-[0.16em] mt-1">{template.type} • {template.author}</p>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-2 rounded-full bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all"
+          aria-label="Close template preview"
+        >
+          <X className="w-6 h-6" />
+        </button>
+      </div>
+
+      <div className="relative z-10 flex-1 overflow-y-auto no-scrollbar px-6 lg:px-12 py-8">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-5 gap-8">
+          <motion.div
+            initial={{ y: 22, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 180, damping: 24 }}
+            className="lg:col-span-2"
+          >
+            <div className="sticky top-6 rounded-[34px] border border-white/20 bg-black/30 backdrop-blur-2xl p-6 shadow-[0_20px_70px_rgba(0,0,0,0.7)]">
+              <div className={`aspect-[3/4] rounded-2xl ${template.color} p-5 border border-black/10 relative overflow-hidden`}>
+                <div className="absolute inset-0 bg-gradient-to-b from-white/20 via-transparent to-black/10" />
+                <div className="relative h-full rounded-xl bg-black/10 border border-black/10 p-4 flex flex-col">
+                  <div className="w-2/3 h-3 bg-black/15 rounded-full mb-3" />
+                  <div className="w-1/2 h-2 bg-black/15 rounded-full mb-5" />
+                  <div className="flex-1 grid grid-cols-2 gap-3">
+                    <div className="rounded-lg bg-black/10 border border-black/10" />
+                    <div className="rounded-lg bg-black/10 border border-black/10" />
+                    <div className="rounded-lg bg-black/10 border border-black/10 col-span-2" />
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={onUseTemplate}
+                className="mt-6 w-full h-14 rounded-2xl bg-white text-black font-black uppercase tracking-[0.2em] text-xs hover:bg-zinc-200 transition-all"
+              >
+                Use This Template
+              </button>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ y: 26, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.08, type: 'spring', stiffness: 170, damping: 24 }}
+            className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-6 auto-rows-[180px]"
+          >
+            <div className="md:col-span-2 rounded-[28px] border border-white/15 bg-white/[0.03] backdrop-blur-xl p-8">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-300 mb-3">Template Positioning</p>
+              <h4 className="text-3xl font-extrabold text-white tracking-tight mb-3">{template.name}</h4>
+              <p className="text-zinc-400 leading-relaxed">
+                High-fidelity storefront composition tuned for premium creator identity. This framework keeps your signal clear while preserving the Canvas aesthetic language.
+              </p>
+            </div>
+            <div className="rounded-[28px] border border-white/15 bg-white/[0.03] backdrop-blur-xl p-6 flex flex-col justify-between">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Theme Fit</p>
+              <p className="text-2xl font-black text-white tracking-tight">{template.type}</p>
+              <LayoutTemplate className="w-6 h-6 text-cyan-300" />
+            </div>
+            <div className="rounded-[28px] border border-white/15 bg-white/[0.03] backdrop-blur-xl p-6 flex flex-col justify-between">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500">Crafted By</p>
+              <p className="text-2xl font-black text-white tracking-tight">{template.author}</p>
+              <Eye className="w-6 h-6 text-cyan-300" />
+            </div>
+            <div className="md:col-span-2 rounded-[28px] border border-white/15 bg-black/40 backdrop-blur-xl p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-500 mb-2">Ready To Publish</p>
+                <p className="text-zinc-300 font-medium">Set this template and continue to claim your `vibejam.co/slug` page.</p>
+              </div>
+              <button
+                onClick={onUseTemplate}
+                className="h-12 px-6 rounded-xl bg-white/10 border border-white/20 text-white font-black uppercase tracking-[0.18em] text-xs hover:bg-white/20 transition-all whitespace-nowrap"
+              >
+                Apply Template
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 const CanvasView: React.FC = () => {
+  const [catalog, setCatalog] = useState<CanvasCatalogResponse | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [isCatalogLoading, setIsCatalogLoading] = useState(true);
   const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [previewTheme, setPreviewTheme] = useState<string | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<string | null>(null);
   const [claimedUsername, setClaimedUsername] = useState('');
   const [isOnboarding, setIsOnboarding] = useState(false);
-  const [, setIsSavingOnboarding] = useState(false);
+  const [isSavingOnboarding, setIsSavingOnboarding] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishResult, setPublishResult] = useState<CanvasPublishResult | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCatalog = async () => {
+      try {
+        const data = await fetchCanvasCatalog();
+        if (cancelled) {
+          return;
+        }
+
+        setCatalog(data);
+        setSelectedTheme((prev) => prev ?? data.themes[0]?.id ?? null);
+        setSelectedTemplate((prev) => prev ?? data.templates[0]?.id ?? null);
+      } catch (error) {
+        if (!cancelled) {
+          setCatalogError(error instanceof Error ? error.message : 'Failed to load Canvas catalog.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsCatalogLoading(false);
+        }
+      }
+    };
+
+    loadCatalog();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const themes = catalog?.themes ?? [];
+  const templates = catalog?.templates ?? [];
+  const featuredFrameworks = catalog?.featuredFrameworks ?? themes.slice(0, 6);
+  const onboardingFrameworks = useMemo(() => {
+    if (!selectedTheme) {
+      return featuredFrameworks;
+    }
+
+    const selected = themes.find((theme) => theme.id === selectedTheme);
+    if (!selected || featuredFrameworks.some((theme) => theme.id === selected.id)) {
+      return featuredFrameworks;
+    }
+
+    return [selected, ...featuredFrameworks.slice(0, 5)];
+  }, [featuredFrameworks, selectedTheme, themes]);
+
+  const themesForDisplay = useMemo<CanvasThemePreview[]>(
+    () =>
+      themes.map((theme, index) => {
+        const override = THEME_DISPLAY_OVERRIDES[theme.id];
+        return {
+          ...theme,
+          name: override?.name ?? theme.name,
+          desc: override?.desc ?? theme.desc,
+          previewColor: FALLBACK_THEME_COLOR_CLASSES[index % FALLBACK_THEME_COLOR_CLASSES.length],
+          icon: FALLBACK_THEME_ICONS[index % FALLBACK_THEME_ICONS.length],
+        };
+      }),
+    [themes],
+  );
+  const landingThemes = useMemo(() => themesForDisplay.slice(0, 5), [themesForDisplay]);
+  const landingTemplates = useMemo(() => templates.slice(0, 6), [templates]);
+  const activePreviewTheme = useMemo(
+    () => themesForDisplay.find((theme) => theme.id === previewTheme) ?? null,
+    [previewTheme, themesForDisplay],
+  );
+  const activePreviewTemplate = useMemo(
+    () => templates.find((template) => template.id === previewTemplate) ?? null,
+    [previewTemplate, templates],
+  );
+
+  const claimedSlug = normalizeSlug(claimedUsername);
+
+  useEffect(() => {
+    if (!activePreviewTheme && !activePreviewTemplate) {
+      return;
+    }
+
+    const originalOverflow = document.body.style.overflow;
+    const originalOverscroll = document.body.style.overscrollBehavior;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPreviewTheme(null);
+        setPreviewTemplate(null);
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.overscrollBehavior = 'none';
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.overscrollBehavior = originalOverscroll;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [activePreviewTheme, activePreviewTemplate]);
+
+  const renderThemePreview = () => {
+    if (!activePreviewTheme) {
+      return null;
+    }
+
+    const handleClose = () => setPreviewTheme(null);
+    const handleUseTheme = () => {
+      setSelectedTheme(activePreviewTheme.id);
+      setPreviewTheme(null);
+    };
+
+    switch (activePreviewTheme.id) {
+      case 'midnight-zenith':
+        return <MidnightZenithPreviewShell onClose={handleClose} onUseTheme={handleUseTheme} />;
+      case 'editorial-kinetic':
+        return <EditorialKineticPreviewShell onClose={handleClose} onUseTheme={handleUseTheme} />;
+      case 'concrete-vibe':
+        return <CreatorHubPreviewShell onClose={handleClose} onUseTheme={handleUseTheme} />;
+      case 'aurora-bento':
+        return <EtherealLiquidPreviewShell onClose={handleClose} onUseTheme={handleUseTheme} />;
+      case 'glass-artifact':
+        return <GlassArtifactPreviewShell onClose={handleClose} onUseTheme={handleUseTheme} />;
+      default:
+        return (
+          <AuroraCrystalBentoPreview
+            theme={activePreviewTheme}
+            onClose={handleClose}
+            onUseTheme={handleUseTheme}
+          />
+        );
+    }
+  };
+
+  const renderTemplatePreview = () => {
+    if (!activePreviewTemplate) {
+      return null;
+    }
+
+    const handleClose = () => setPreviewTemplate(null);
+    const handleUseTemplate = () => {
+      setSelectedTemplate(activePreviewTemplate.id);
+      setPreviewTemplate(null);
+    };
+
+    switch (activePreviewTemplate.id) {
+      case 'gold-standard':
+        return (
+          <GoldStandardCollectionPreviewShell
+            onClose={handleClose}
+            onUseTemplate={handleUseTemplate}
+          />
+        );
+      case 'accordion-deck':
+        return (
+          <AccordionDeckCollectionPreviewShell
+            onClose={handleClose}
+            onUseTemplate={handleUseTemplate}
+          />
+        );
+      case 'collage-os':
+        return (
+          <CollageOsCollectionPreviewShell
+            onClose={handleClose}
+            onUseTemplate={handleUseTemplate}
+          />
+        );
+      case 'terrarium':
+        return (
+          <TerrariumCollectionPreviewShell
+            onClose={handleClose}
+            onUseTemplate={handleUseTemplate}
+          />
+        );
+      case 'prism-os':
+        return (
+          <PrismOsCollectionPreviewShell
+            onClose={handleClose}
+            onUseTemplate={handleUseTemplate}
+          />
+        );
+      case 'aero-canvas':
+        return (
+          <AeroCanvasCollectionPreviewShell
+            onClose={handleClose}
+            onUseTemplate={handleUseTemplate}
+          />
+        );
+      default:
+        return (
+          <CollectionTemplatePreview
+            template={activePreviewTemplate}
+            onClose={handleClose}
+            onUseTemplate={handleUseTemplate}
+          />
+        );
+    }
+  };
 
   return (
     <div className="space-y-32 pb-32">
@@ -349,7 +664,7 @@ const CanvasView: React.FC = () => {
             <div className="relative w-full sm:w-80 group">
               <input 
                 type="text" 
-                placeholder="vibejam.me/yourname"
+                placeholder="vibejam.co/yourname"
                 value={claimedUsername}
                 onChange={(e) => setClaimedUsername(e.target.value)}
                 className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-6 text-white font-mono-data focus:outline-none focus:ring-1 focus:ring-white/30 transition-all"
@@ -359,13 +674,15 @@ const CanvasView: React.FC = () => {
                 <span className="text-[8px] font-bold tracking-widest uppercase">Available</span>
               </div>
             </div>
-            <button 
-              onClick={() => claimedUsername && setIsOnboarding(true)}
+            <button
+              disabled={!claimedSlug || onboardingFrameworks.length === 0 || isCatalogLoading}
+              onClick={() => claimedSlug && onboardingFrameworks.length > 0 && setIsOnboarding(true)}
               className="h-14 px-8 rounded-2xl bg-white text-black font-black uppercase tracking-tight hover:bg-zinc-200 transition-all flex items-center gap-2 w-full sm:w-auto justify-center"
             >
-              Claim My Canvas <ArrowRight className="w-4 h-4" />
+              {isCatalogLoading ? 'Loading Canvas...' : 'Claim My Canvas'} <ArrowRight className="w-4 h-4" />
             </button>
           </motion.div>
+          {claimedSlug && <p className="mt-3 text-xs text-zinc-500 font-mono-data">Publishing as `https://vibejam.co/{claimedSlug}`</p>}
         </div>
 
         {/* Floating Preview Asset (Mobile Mockup-like) */}
@@ -394,7 +711,7 @@ const CanvasView: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
-          {THEMES.map((theme, i) => (
+          {landingThemes.map((theme, i) => (
             <motion.div
               key={theme.id}
               initial={{ opacity: 0, y: 30 }}
@@ -523,16 +840,20 @@ const CanvasView: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          {TEMPLATES.map((tmpl, i) => (
+              {landingTemplates.map((tmpl, i) => (
             <motion.div 
-              key={tmpl.name}
+              key={tmpl.id}
               initial={{ opacity: 0, scale: 0.9 }}
               whileInView={{ opacity: 1, scale: 1 }}
               viewport={{ once: true }}
               transition={{ delay: i * 0.05 }}
               className="group cursor-pointer"
+              onClick={() => {
+                setSelectedTemplate(tmpl.id);
+                setPreviewTemplate(tmpl.id);
+              }}
             >
-              <div className={`aspect-[3/4] rounded-2xl ${tmpl.color} mb-3 relative overflow-hidden transition-transform group-hover:-translate-y-2`}>
+              <div className={`aspect-[3/4] rounded-2xl ${tmpl.color} mb-3 relative overflow-hidden transition-transform group-hover:-translate-y-2 ${selectedTemplate === tmpl.id ? 'ring-2 ring-white/60' : ''}`}>
                 <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <Eye className="w-6 h-6 text-white" />
                 </div>
@@ -561,28 +882,53 @@ const CanvasView: React.FC = () => {
          </button>
       </div>
 
+      {publishResult && (
+        <div className="p-6 rounded-3xl border border-emerald-500/30 bg-emerald-500/10">
+          <p className="text-emerald-200 font-bold text-sm">Canvas published successfully.</p>
+          <p className="text-emerald-100 font-mono-data text-sm mt-1">{publishResult.url}</p>
+        </div>
+      )}
+
+      {catalogError && (
+        <div className="p-6 rounded-3xl border border-yellow-500/30 bg-yellow-500/10">
+          <p className="text-yellow-200 text-sm">Catalog notice: {catalogError}</p>
+        </div>
+      )}
+
       {/* FULL-SCREEN THEME PREVIEW OVERLAY */}
-      <AnimatePresence>
-        {previewTheme === 'aurora' && (
-          <AuroraCrystalBentoPreview onClose={() => setPreviewTheme(null)} />
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {renderThemePreview()}
+            {renderTemplatePreview()}
+          </AnimatePresence>,
+          document.body,
         )}
-      </AnimatePresence>
 
       {/* ONBOARDING FLOW OVERLAY */}
       <AnimatePresence>
         {isOnboarding && (
           <CanvasOnboarding 
-            claimedName={claimedUsername} 
+            claimedName={claimedSlug}
+            vanitySlug={claimedSlug}
+            frameworks={onboardingFrameworks}
+            initialThemeId={selectedTheme ?? undefined}
+            selectedTemplateId={selectedTemplate ?? undefined}
+            isPublishing={isSavingOnboarding}
+            publishError={publishError}
             onClose={() => setIsOnboarding(false)}
             onComplete={async (data) => {
               setIsSavingOnboarding(true);
+              setPublishError(null);
               try {
-                await saveCanvasOnboarding(data);
+                const result = await saveCanvasOnboarding(data);
+                setPublishResult(result);
+                setClaimedUsername(result.slug);
+                setIsOnboarding(false);
               } catch (error) {
-                console.error('Failed to save Canvas onboarding:', error);
+                setPublishError(error instanceof Error ? error.message : 'Failed to publish Canvas artifact.');
               } finally {
                 setIsSavingOnboarding(false);
-                setIsOnboarding(false);
               }
             }}
           />

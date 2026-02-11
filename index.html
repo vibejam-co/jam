@@ -5,21 +5,167 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VibeJam - Midnight Zenith</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23000'/%3E%3Cpath d='M14 18h10l8 20 8-20h10L36 46h-8L14 18z' fill='%23D4AF37'/%3E%3C/svg%3E">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&family=Gaegu:wght@400;700&family=Gloria+Hallelujah&family=Gochi+Hand&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Oswald:wght@200..700&family=Permanent+Marker&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Quicksand:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
       body {
         background-color: #000000;
         color: #ffffff;
         font-family: 'Inter', sans-serif;
       }
+      .font-cinema {
+        font-family: 'Plus Jakarta Sans', 'Space Grotesk', 'Inter', sans-serif;
+      }
+      .font-rounded {
+        font-family: 'Quicksand', 'Inter', sans-serif;
+      }
       .font-mono-data {
         font-family: 'JetBrains Mono', monospace;
       }
       .font-serif-rank {
         font-family: 'Playfair Display', serif;
+      }
+      .font-serif-editorial {
+        font-family: 'Playfair Display', serif;
+      }
+      .font-oswald {
+        font-family: 'Oswald', sans-serif;
+      }
+      .font-bodoni {
+        font-family: 'Bodoni Moda', serif;
+      }
+      .font-handwritten {
+        font-family: 'Gloria Hallelujah', cursive;
+      }
+      .font-marker {
+        font-family: 'Permanent Marker', cursive;
+      }
+      .font-typewriter {
+        font-family: 'Courier Prime', monospace;
+      }
+      .cozy-font {
+        font-family: 'Gaegu', cursive;
+      }
+      .handwritten {
+        font-family: 'Gochi Hand', cursive;
+      }
+      .font-sans-editorial {
+        font-family: 'Inter', sans-serif;
+      }
+      .tracking-tightest {
+        letter-spacing: -0.055em;
+      }
+      .masonry-grid {
+        display: grid;
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+        gap: 1.5rem;
+        grid-auto-flow: dense;
+      }
+      @media (min-width: 768px) {
+        .masonry-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 1.75rem;
+        }
+      }
+      @media (min-width: 1280px) {
+        .masonry-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 2rem;
+        }
+      }
+      .mesh-gradient {
+        background:
+          radial-gradient(circle at 20% 25%, rgba(37, 99, 235, 0.36), transparent 55%),
+          radial-gradient(circle at 82% 20%, rgba(236, 72, 153, 0.3), transparent 52%),
+          radial-gradient(circle at 52% 80%, rgba(59, 130, 246, 0.22), transparent 45%),
+          linear-gradient(135deg, #080b15 0%, #0f1733 45%, #1a1030 100%);
+      }
+      .aerogel {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.25),
+          0 18px 45px rgba(10, 15, 35, 0.35);
+        backdrop-filter: blur(40px) saturate(120%);
+        -webkit-backdrop-filter: blur(40px) saturate(120%);
+      }
+      .soft-shadow {
+        box-shadow: 0 14px 34px rgba(88, 72, 55, 0.12);
+      }
+      .clay-gradient {
+        background: linear-gradient(135deg, #e07a5f 0%, #ea8d6e 56%, #d56443 100%);
+      }
+      .sand-gradient {
+        background: linear-gradient(135deg, #f6f1e8 0%, #efe7db 100%);
+      }
+      .noise-overlay {
+        background-image:
+          radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.7) 1px, transparent 0);
+        background-size: 3px 3px;
+      }
+      @keyframes waveform {
+        0%, 100% {
+          transform: scaleY(0.3);
+          opacity: 0.65;
+        }
+        50% {
+          transform: scaleY(1);
+          opacity: 1;
+        }
+      }
+      .animate-waveform {
+        height: 16px;
+        transform-origin: bottom;
+        animation: waveform 1.2s ease-in-out infinite;
+      }
+      @keyframes spin-slow {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .animate-spin-slow {
+        animation: spin-slow 3s linear infinite;
+      }
+      .grain {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 40;
+        opacity: 0.04;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+      }
+      .grain-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 60;
+        opacity: 0.05;
+        background-image: url('https://www.transparenttextures.com/patterns/p6.png');
+      }
+      .corkboard {
+        background-image: url('https://www.transparenttextures.com/patterns/cork-board.png');
+      }
+      .paper-texture {
+        background-image: url('https://www.transparenttextures.com/patterns/rough-paper.png');
+      }
+      .scanlines {
+        background: linear-gradient(
+          to bottom,
+          rgba(18, 16, 16, 0) 50%,
+          rgba(0, 0, 0, 0.25) 50%
+        );
+        background-size: 100% 4px;
+        pointer-events: none;
+      }
+      .dot-grid {
+        background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+        background-size: 24px 24px;
       }
       /* Custom Shine Animation */
       @keyframes shine {

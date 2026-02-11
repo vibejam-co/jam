@@ -1,4 +1,6 @@
 
+import type { RankTier } from './lib/ranking';
+
 export interface RevenuePoint {
   date: string;
   revenue: number;
@@ -7,6 +9,8 @@ export interface RevenuePoint {
 export interface VibeApp {
   id: string;
   rank: string;
+  rankValue?: number;
+  rankTier?: RankTier;
   name: string;
   pitch: string;
   icon: string;
@@ -70,8 +74,40 @@ export interface CanvasProfileInput {
 
 export interface CanvasOnboardingPayload {
   claimedName: string;
+  vanitySlug?: string;
   profile: CanvasProfileInput;
   selectedTheme: string;
+  selectedTemplateId?: string;
   selectedSignals: string[];
   links: Record<string, string>;
+}
+
+export interface CanvasTheme {
+  id: string;
+  name: string;
+  desc: string;
+  accent: string;
+  previewImg: string;
+}
+
+export interface CanvasTemplate {
+  id: string;
+  name: string;
+  type: string;
+  author: string;
+  color: string;
+}
+
+export interface CanvasCatalogResponse {
+  themes: CanvasTheme[];
+  templates: CanvasTemplate[];
+  featuredFrameworks: CanvasTheme[];
+}
+
+export interface CanvasPublishResult {
+  success: boolean;
+  profileId: string;
+  slug: string;
+  url: string;
+  publishedAt: string;
 }

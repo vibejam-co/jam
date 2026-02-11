@@ -2,7 +2,9 @@
   "name": "copy-3-of-vibejam---midnight-zenith",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -10,11 +12,12 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
     "framer-motion": "^12.34.0",
     "lucide-react": "^0.563.0",
-    "recharts": "^2.15.0"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "recharts": "^2.15.0",
+    "vercel": "^50.14.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

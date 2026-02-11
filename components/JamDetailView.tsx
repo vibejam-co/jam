@@ -70,7 +70,7 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
             <div>
               <div className="flex items-center gap-3">
                 <h2 className="text-xl font-extrabold text-white tracking-tight">{app.name}</h2>
-                <RankingBadge rank={app.rank} size="md" />
+                <RankingBadge rank={app.rankValue ?? app.rank} tier={app.rankTier} size="md" />
               </div>
               <p className="text-zinc-500 text-xs font-medium uppercase tracking-widest">The Deal Room</p>
             </div>

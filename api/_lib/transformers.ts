@@ -1,4 +1,5 @@
 import type { Notification, RevenuePoint, VibeApp } from '../../types';
+import { formatRank, getRankTier, parseRankValue } from '../../lib/ranking';
 
 type JamRow = {
   id: string;
@@ -48,34 +49,38 @@ type NotificationRow = {
   jam_id: string | null;
 };
 
-export const toDbJamInput = (app: VibeApp) => ({
-  rank: app.rank,
-  name: app.name,
-  pitch: app.pitch,
-  icon: app.icon,
-  accent_color: app.accentColor,
-  monthly_revenue: app.monthlyRevenue,
-  lifetime_revenue: app.lifetimeRevenue,
-  active_users: app.activeUsers,
-  build_streak: app.buildStreak,
-  growth: app.growth,
-  tags: app.tags,
-  verified: app.verified,
-  category: app.category,
-  founder_name: app.founder.name,
-  founder_handle: app.founder.handle,
-  founder_avatar: app.founder.avatar,
-  founder_email: app.founder.email ?? null,
-  tech_stack: app.techStack,
-  problem: app.problem,
-  solution: app.solution,
-  pricing: app.pricing,
-  is_for_sale: Boolean(app.isForSale),
-  asking_price: app.askingPrice ?? null,
-  profit_margin: app.profitMargin ?? null,
-  is_anonymous: Boolean(app.isAnonymous),
-  boost_tier: app.boostTier ?? null,
-});
+export const toDbJamInput = (app: VibeApp) => {
+  const parsedRank = parseRankValue(app.rank);
+
+  return {
+    rank: parsedRank ? formatRank(parsedRank) : null,
+    name: app.name,
+    pitch: app.pitch,
+    icon: app.icon,
+    accent_color: app.accentColor,
+    monthly_revenue: app.monthlyRevenue,
+    lifetime_revenue: app.lifetimeRevenue,
+    active_users: app.activeUsers,
+    build_streak: app.buildStreak,
+    growth: app.growth,
+    tags: app.tags,
+    verified: app.verified,
+    category: app.category,
+    founder_name: app.founder.name,
+    founder_handle: app.founder.handle,
+    founder_avatar: app.founder.avatar,
+    founder_email: app.founder.email ?? null,
+    tech_stack: app.techStack,
+    problem: app.problem,
+    solution: app.solution,
+    pricing: app.pricing,
+    is_for_sale: Boolean(app.isForSale),
+    asking_price: app.askingPrice ?? null,
+    profit_margin: app.profitMargin ?? null,
+    is_anonymous: Boolean(app.isAnonymous),
+    boost_tier: app.boostTier ?? null,
+  };
+};
 
 export const toDbRevenueInput = (jamId: string, history: RevenuePoint[] | undefined) => {
   const source = history && history.length > 0 ? history : [{ date: 'Month 1', revenue: 0 }];
@@ -112,8 +117,11 @@ export const toVibeApps = (jams: JamRow[], revenueRows: RevenueRow[]): VibeApp[]
   });
 
   return sorted.map((jam, index) => ({
+    // Rank is canonicalized from the live backend ordering so tier transitions are deterministic.
+    rankValue: index + 1,
+    rank: formatRank(index + 1),
+    rankTier: getRankTier(index + 1),
     id: jam.id,
-    rank: jam.rank ?? String(index + 1).padStart(2, '0'),
     name: jam.name,
     pitch: jam.pitch,
     icon: jam.icon,

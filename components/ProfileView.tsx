@@ -15,11 +15,26 @@ interface ProfileViewProps {
   wishlist: VibeApp[];
   myJams: VibeApp[];
   onSelectApp: (app: VibeApp) => void;
+  displayName: string;
+  handle: string;
+  avatarUrl: string;
+  onSignOut: () => void;
+  isSigningOut?: boolean;
 }
 
 type ProfileTab = 'Wishlist' | 'My Jams' | 'Settings';
 
-const ProfileView: React.FC<ProfileViewProps> = ({ onClose, wishlist, myJams, onSelectApp }) => {
+const ProfileView: React.FC<ProfileViewProps> = ({
+  onClose,
+  wishlist,
+  myJams,
+  onSelectApp,
+  displayName,
+  handle,
+  avatarUrl,
+  onSignOut,
+  isSigningOut = false,
+}) => {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Wishlist');
 
   return (
@@ -45,7 +60,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ onClose, wishlist, myJams, on
           <div className="flex justify-between items-start mb-8">
             <div className="relative group">
               <div className="w-20 h-20 rounded-[28px] overflow-hidden border-2 border-white/10 group-hover:border-white/30 transition-all shadow-2xl">
-                <img src="https://picsum.photos/id/64/200/200" alt="Avatar" className="w-full h-full object-cover" />
+                <img src={avatarUrl} alt={`${displayName} avatar`} className="w-full h-full object-cover" />
               </div>
               <div className="absolute -bottom-2 -right-2 p-1.5 rounded-xl bg-green-500 border-4 border-[#050505] shadow-lg">
                 <ShieldCheck className="w-3.5 h-3.5 text-black" />
@@ -57,8 +72,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({ onClose, wishlist, myJams, on
           </div>
           
           <div className="space-y-1">
-            <h2 className="text-2xl font-black text-white tracking-tight">Alex Vibe</h2>
-            <p className="text-zinc-500 text-sm font-medium">@alexvibe • Elite Curator</p>
+            <h2 className="text-2xl font-black text-white tracking-tight">{displayName}</h2>
+            <p className="text-zinc-500 text-sm font-medium">{handle} • Creator</p>
           </div>
 
           <div className="flex gap-4 mt-8">
@@ -265,8 +280,12 @@ const ProfileView: React.FC<ProfileViewProps> = ({ onClose, wishlist, myJams, on
 
         {/* Footer: Session Control */}
         <footer className="p-8 border-t border-white/5 bg-[#070707]">
-          <button className="w-full h-14 rounded-2xl bg-white/5 border border-white/10 text-zinc-500 hover:text-white hover:border-red-500/30 hover:bg-red-500/5 font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 transition-all">
-            <LogOut className="w-4 h-4" /> Sign Out
+          <button
+            onClick={onSignOut}
+            disabled={isSigningOut}
+            className="w-full h-14 rounded-2xl bg-white/5 border border-white/10 text-zinc-500 hover:text-white hover:border-red-500/30 hover:bg-red-500/5 font-black uppercase tracking-widest text-xs flex items-center justify-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <LogOut className="w-4 h-4" /> {isSigningOut ? 'Signing Out...' : 'Sign Out'}
           </button>
         </footer>
 

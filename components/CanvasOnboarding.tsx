@@ -8,64 +8,19 @@ import {
   Share2, ShieldCheck, Zap, ArrowRight, Smartphone,
   Layout, Eye, Rocket, Send
 } from 'lucide-react';
-import { CanvasOnboardingPayload } from '../types';
+import { CanvasOnboardingPayload, CanvasTheme } from '../types';
 
 interface CanvasOnboardingProps {
   claimedName: string;
+  vanitySlug: string;
+  frameworks: CanvasTheme[];
+  initialThemeId?: string;
+  selectedTemplateId?: string;
+  isPublishing?: boolean;
+  publishError?: string | null;
   onClose: () => void;
   onComplete: (data: CanvasOnboardingPayload) => void | Promise<void>;
 }
-
-const VIBE_FRAMEWORKS = [
-  { 
-    id: 'midnight-zenith', 
-    name: 'Midnight Zenith', 
-    desc: 'Bento-style architecture with glass-morphism.',
-    previewImg: 'https://images.unsplash.com/photo-1614850523296-d8c1af93d400?auto=format&fit=crop&q=80&w=600',
-    accent: 'cyan-400',
-    bg: 'bg-black'
-  },
-  { 
-    id: 'editorial-kinetic', 
-    name: 'Editorial Kinetic', 
-    desc: 'Bold Swiss typography and high-contrast layouts.',
-    previewImg: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?auto=format&fit=crop&q=80&w=600',
-    accent: 'yellow-400',
-    bg: 'bg-[#FDF6E3]'
-  },
-  { 
-    id: 'concrete-vibe', 
-    name: 'Concrete Vibe', 
-    desc: 'Brutalist minimalism with raw textures.',
-    previewImg: 'https://images.unsplash.com/photo-1614850523459-c2f4c699c52e?auto=format&fit=crop&q=80&w=600',
-    accent: 'rose-500',
-    bg: 'bg-zinc-900'
-  },
-  { 
-    id: 'aurora-bento', 
-    name: 'Aurora Bento', 
-    desc: 'Soft gradients and organic liquid shapes.',
-    previewImg: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=600',
-    accent: 'purple-500',
-    bg: 'bg-zinc-950'
-  },
-  { 
-    id: 'glass-artifact', 
-    name: 'Glass Artifact', 
-    desc: 'Pure transparency for ultra-clean storefronts.',
-    previewImg: 'https://images.unsplash.com/photo-1633167606207-d840b5070fc2?auto=format&fit=crop&q=80&w=600',
-    accent: 'blue-400',
-    bg: 'bg-black'
-  },
-  { 
-    id: 'retro-grid', 
-    name: 'Retro Grid', 
-    desc: 'Structured 8-bit energy for builders.',
-    previewImg: 'https://images.unsplash.com/photo-1618556450991-2f1af64e8191?auto=format&fit=crop&q=80&w=600',
-    accent: 'green-400',
-    bg: 'bg-[#0F1115]'
-  }
-];
 
 const SIGNALS = [
   { id: 'instagram', name: 'Instagram', icon: Instagram, color: '#E4405F' },
@@ -78,9 +33,19 @@ const SIGNALS = [
   { id: 'store', name: 'Storefront', icon: ShoppingBag, color: '#D4AF37' },
 ];
 
-const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({ claimedName, onClose, onComplete }) => {
+const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
+  claimedName,
+  vanitySlug,
+  frameworks,
+  initialThemeId,
+  selectedTemplateId,
+  isPublishing = false,
+  publishError = null,
+  onClose,
+  onComplete,
+}) => {
   const [step, setStep] = useState(1);
-  const [selectedTheme, setSelectedTheme] = useState('midnight-zenith');
+  const [selectedTheme, setSelectedTheme] = useState(initialThemeId ?? frameworks[0]?.id ?? 'midnight-zenith');
   const [selectedSignals, setSelectedSignals] = useState<string[]>([]);
   const [links, setLinks] = useState<Record<string, string>>({});
   const [profile, setProfile] = useState({
@@ -123,7 +88,7 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({ claimedName, onClos
           </button>
           <div className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10">
             <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-[#D4AF37]">Securing {claimedName}</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#D4AF37]">Securing vibejam.co/{vanitySlug}</span>
           </div>
         </div>
         
@@ -167,14 +132,14 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({ claimedName, onClos
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {VIBE_FRAMEWORKS.map(f => (
+                {frameworks.map(f => (
                   <button
                     key={f.id}
                     onClick={() => setSelectedTheme(f.id)}
                     className={`group relative aspect-[4/5] rounded-[48px] overflow-hidden border-2 transition-all duration-700
                       ${selectedTheme === f.id ? 'border-white scale-[1.02] shadow-[0_0_80px_rgba(255,255,255,0.1)]' : 'border-white/5 hover:border-white/20'}`}
                   >
-                    <img 
+                    <img
                       src={f.previewImg} 
                       className={`absolute inset-0 w-full h-full object-cover transition-all duration-1000 
                         ${selectedTheme === f.id ? 'grayscale-0 scale-105' : 'grayscale opacity-40 group-hover:grayscale-0 group-hover:opacity-80'}`} 
@@ -220,7 +185,12 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({ claimedName, onClos
                 {SIGNALS.map(s => (
                   <button
                     key={s.id}
-                    onClick={() => toggleSignal(s.id)}
+                    onClick={() => {
+                      if (!selectedSignals.includes(s.id) && selectedSignals.length >= 5) {
+                        return;
+                      }
+                      toggleSignal(s.id);
+                    }}
                     className={`group relative aspect-square rounded-[40px] border transition-all duration-500 flex flex-col items-center justify-center gap-4
                       ${selectedSignals.includes(s.id) 
                         ? 'bg-white border-white scale-105' 
@@ -371,7 +341,7 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({ claimedName, onClos
               <div className="w-full max-w-md aspect-[9/16] bg-black rounded-[60px] border-[12px] border-[#1a1a1a] shadow-[0_50px_100px_rgba(0,0,0,1)] relative overflow-hidden flex flex-col items-center pt-20 px-10 text-center">
                  {/* Preview Theme Background Artifact */}
                  <div className={`absolute inset-0 opacity-20 pointer-events-none`}>
-                    <img src={VIBE_FRAMEWORKS.find(f => f.id === selectedTheme)?.previewImg} className="w-full h-full object-cover grayscale" />
+                    <img src={frameworks.find(f => f.id === selectedTheme)?.previewImg} className="w-full h-full object-cover grayscale" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
                  </div>
 
@@ -407,13 +377,16 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({ claimedName, onClos
                  </div>
               </div>
 
-              <div className="mt-16 flex flex-col items-center gap-6">
-                 <button 
-                  onClick={() => onComplete({ claimedName, profile, selectedTheme, selectedSignals, links })}
+                 <div className="mt-16 flex flex-col items-center gap-6">
+                 <button
+                  disabled={isPublishing}
+                  onClick={() => onComplete({ claimedName, vanitySlug, profile, selectedTheme, selectedTemplateId, selectedSignals, links })}
                   className="h-20 px-16 rounded-[32px] bg-white text-black font-black uppercase tracking-widest text-sm flex items-center gap-4 hover:scale-105 transition-all shadow-[0_20px_60px_rgba(255,255,255,0.2)] active:scale-95 group"
                  >
-                   Broadcast Final Artifact <Send className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                   {isPublishing ? 'Publishing Artifact...' : 'Broadcast Final Artifact'} <Send className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                  </button>
+                 <p className="text-zinc-500 text-xs font-medium">Live URL: https://vibejam.co/{vanitySlug}</p>
+                 {publishError && <p className="text-red-300 text-xs">{publishError}</p>}
                  <p className="text-zinc-600 text-[10px] font-bold uppercase tracking-[0.3em]">Institutional Grade Deployment</p>
               </div>
             </motion.div>

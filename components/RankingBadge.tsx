@@ -2,15 +2,18 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Trophy, Star, Crown, ShieldCheck, Award, Zap, Hexagon } from 'lucide-react';
+import { getRankTier, parseRankValue, type RankTier } from '../lib/ranking';
 
 interface RankingBadgeProps {
   rank: string | number;
+  tier?: RankTier;
   size?: 'sm' | 'md' | 'lg';
 }
 
-const RankingBadge: React.FC<RankingBadgeProps> = ({ rank, size = 'md' }) => {
-  const numericRank = typeof rank === 'string' ? parseInt(rank, 10) : rank;
-  if (isNaN(numericRank)) return null;
+const RankingBadge: React.FC<RankingBadgeProps> = ({ rank, tier, size = 'md' }) => {
+  const numericRank = parseRankValue(rank);
+  const resolvedTier = tier ?? (numericRank ? getRankTier(numericRank) : null);
+  if (!resolvedTier) return null;
 
   const getSizeClasses = () => {
     switch (size) {
@@ -29,7 +32,7 @@ const RankingBadge: React.FC<RankingBadgeProps> = ({ rank, size = 'md' }) => {
   };
 
   // Tier Definitions
-  if (numericRank <= 3) {
+  if (resolvedTier === 'zenith') {
     return (
       <motion.div 
         whileHover={{ scale: 1.05 }}
@@ -86,7 +89,7 @@ const RankingBadge: React.FC<RankingBadgeProps> = ({ rank, size = 'md' }) => {
     );
   }
 
-  if (numericRank <= 10) {
+  if (resolvedTier === 'star') {
     return (
       <div className={`relative flex items-center justify-center font-black uppercase tracking-[0.2em] rounded-full border border-cyan-400/30 bg-black/40 backdrop-blur-md text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.2)] ${getSizeClasses()}`}>
         <Star size={getIconSize()} fill="currentColor" />
@@ -95,7 +98,7 @@ const RankingBadge: React.FC<RankingBadgeProps> = ({ rank, size = 'md' }) => {
     );
   }
 
-  if (numericRank <= 50) {
+  if (resolvedTier === 'trophy') {
     return (
       <div className={`relative flex items-center justify-center font-black uppercase tracking-[0.2em] rounded-full border border-purple-500/30 bg-black/40 backdrop-blur-md text-purple-400 ${getSizeClasses()}`}>
         <Trophy size={getIconSize()} />
@@ -104,7 +107,7 @@ const RankingBadge: React.FC<RankingBadgeProps> = ({ rank, size = 'md' }) => {
     );
   }
 
-  if (numericRank <= 100) {
+  if (resolvedTier === 'top100') {
     return (
       <div className={`relative flex items-center justify-center font-black uppercase tracking-[0.15em] rounded-full border border-emerald-500/30 bg-black/20 text-emerald-400 ${getSizeClasses()}`}>
         <Zap size={getIconSize()} fill="currentColor" />
@@ -113,7 +116,7 @@ const RankingBadge: React.FC<RankingBadgeProps> = ({ rank, size = 'md' }) => {
     );
   }
 
-  if (numericRank <= 1000) {
+  if (resolvedTier === 'top1k') {
     return (
       <div className={`relative flex items-center justify-center font-black uppercase tracking-[0.1em] rounded-full border border-white/10 bg-white/5 text-white/70 ${getSizeClasses()}`}>
         <Award size={getIconSize()} />
@@ -122,7 +125,7 @@ const RankingBadge: React.FC<RankingBadgeProps> = ({ rank, size = 'md' }) => {
     );
   }
 
-  if (numericRank <= 10000) {
+  if (resolvedTier === 'top10k') {
     return (
       <div className={`relative flex items-center justify-center font-bold uppercase tracking-[0.1em] rounded-full border border-zinc-800 bg-zinc-900/50 text-zinc-500 ${getSizeClasses()}`}>
         <Hexagon size={getIconSize()} />

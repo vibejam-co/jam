@@ -12,11 +12,14 @@ import CanvasView from './components/CanvasView';
 import StartJamModal from './components/StartJamModal';
 import ListAppModal from './components/ListAppModal';
 import ProfileView from './components/ProfileView';
+import AuthModal from './components/AuthModal';
 import NotificationCenter from './components/NotificationCenter';
 import NewsletterSection from './components/NewsletterSection';
 import Footer from './components/Footer';
 import LegalModal from './components/LegalModal';
 import { fetchApps, fetchNotifications, publishApp } from './lib/api';
+import { supabase } from './lib/supabase-client';
+import type { User } from '@supabase/supabase-js';
 
 // Quick filters remain as the high-traffic entry points
 const QUICK_FILTERS = ['All', 'AI', 'SaaS', 'Crypto', 'Marketplace'];
@@ -46,6 +49,9 @@ const App: React.FC = () => {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   
   // Legal & Support State
   const [legalModalTab, setLegalModalTab] = useState<'Terms' | 'Privacy' | 'Support' | null>(null);
@@ -86,6 +92,35 @@ const App: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    let isMounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!isMounted) {
+        return;
+      }
+      setAuthUser(data.session?.user ?? null);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+      if (session?.user) {
+        setIsAuthOpen(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const filteredApps = apps.filter(app => {
     if (filter === 'All') return true;
     // Marketplace filter shows apps that are for sale
@@ -95,6 +130,16 @@ const App: React.FC = () => {
   });
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
+  const authEmail = authUser?.email ?? '';
+  const avatarUrl =
+    (authUser?.user_metadata?.avatar_url as string | undefined) ||
+    (authUser?.user_metadata?.picture as string | undefined) ||
+    'https://picsum.photos/id/64/100/100';
+  const displayName =
+    (authUser?.user_metadata?.full_name as string | undefined) ||
+    (authUser?.user_metadata?.name as string | undefined) ||
+    (authEmail ? authEmail.split('@')[0] : 'Guest');
+  const handle = authEmail ? `@${authEmail.split('@')[0]}` : '@guest';
 
   const handlePublishJam = async (newApp: VibeApp) => {
     if (isPublishing) {
@@ -141,6 +186,29 @@ const App: React.FC = () => {
   const isAppInWishlist = (appId: string) => wishlist.some(a => a.id === appId);
   const markAllRead = () => setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
   const getAppById = (appId: string) => apps.find(a => a.id === appId);
+  const handleProfileClick = () => {
+    if (authUser) {
+      setIsProfileOpen(true);
+      return;
+    }
+
+    setIsAuthOpen(true);
+  };
+
+  const handleSignOut = async () => {
+    if (!supabase) {
+      setLoadError('Auth is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+      return;
+    }
+
+    setIsSigningOut(true);
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setLoadError(error.message);
+    }
+    setIsSigningOut(false);
+    setIsProfileOpen(false);
+  };
 
   return (
     <div className="min-h-screen bg-black text-white selection:bg-white/20">
@@ -178,6 +246,14 @@ const App: React.FC = () => {
             <button onClick={() => setIsStartJamOpen(true)} className="hidden sm:flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/20 text-xs font-bold hover:bg-white hover:text-black transition-all">
               <Plus className="w-3.5 h-3.5" /> Start Jam
             </button>
+            {!authUser && (
+              <button
+                onClick={() => setIsAuthOpen(true)}
+                className="hidden sm:flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/20 text-xs font-bold text-zinc-200 hover:bg-white hover:text-black transition-all"
+              >
+                Sign In
+              </button>
+            )}
             <div className="flex items-center gap-3 relative">
               <button onClick={() => setIsNotificationsOpen(!isNotificationsOpen)} className="relative p-1 transition-transform hover:scale-110 active:scale-95">
                 <Bell className={`w-5 h-5 transition-colors ${isNotificationsOpen ? 'text-white' : 'text-zinc-400'}`} />
@@ -194,8 +270,8 @@ const App: React.FC = () => {
                   </>
                 )}
               </AnimatePresence>
-              <div onClick={() => setIsProfileOpen(true)} className="w-8 h-8 rounded-full bg-zinc-800 border border-white/10 overflow-hidden cursor-pointer hover:border-white/30 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.05)]">
-                <img src="https://picsum.photos/id/64/100/100" alt="Avatar" className="w-full h-full object-cover" />
+              <div onClick={handleProfileClick} className="w-8 h-8 rounded-full bg-zinc-800 border border-white/10 overflow-hidden cursor-pointer hover:border-white/30 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.05)]">
+                <img src={avatarUrl} alt={`${displayName} avatar`} className="w-full h-full object-cover" />
               </div>
             </div>
           </div>
@@ -368,7 +444,25 @@ const App: React.FC = () => {
         {selectedApp && <JamDetailView app={selectedApp} onClose={() => setSelectedApp(null)} onToggleWishlist={handleToggleWishlist} isInWishlist={isAppInWishlist(selectedApp.id)} />}
       </AnimatePresence>
       <AnimatePresence>
-        {isProfileOpen && <ProfileView wishlist={wishlist} myJams={apps.filter(a => a.id === '1')} onClose={() => setIsProfileOpen(false)} onSelectApp={(app) => { setIsProfileOpen(false); setSelectedApp(app); }} />}
+        {isProfileOpen && (
+          <ProfileView
+            wishlist={wishlist}
+            myJams={apps.filter(a => a.id === '1')}
+            displayName={displayName}
+            handle={handle}
+            avatarUrl={avatarUrl}
+            isSigningOut={isSigningOut}
+            onSignOut={handleSignOut}
+            onClose={() => setIsProfileOpen(false)}
+            onSelectApp={(app) => {
+              setIsProfileOpen(false);
+              setSelectedApp(app);
+            }}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {isAuthOpen && <AuthModal onClose={() => setIsAuthOpen(false)} />}
       </AnimatePresence>
       <AnimatePresence>
         {isStartJamOpen && <StartJamModal onClose={() => setIsStartJamOpen(false)} onPublish={handlePublishJam} />}

@@ -53,7 +53,7 @@ const FeedRow: React.FC<FeedRowProps> = ({ app, index, onClick, onToggleWishlist
         <div className="flex flex-col min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
             <h3 className="text-white font-bold text-base sm:text-lg truncate tracking-tight">{app.name}</h3>
-            <RankingBadge rank={app.rank} size="sm" />
+            <RankingBadge rank={app.rankValue ?? app.rank} tier={app.rankTier} size="sm" />
           </div>
           <p className="text-zinc-500 text-xs sm:text-sm truncate max-w-full font-medium">
             {app.pitch}
@@ -88,10 +88,10 @@ const FeedRow: React.FC<FeedRowProps> = ({ app, index, onClick, onToggleWishlist
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
-              className="flex items-center gap-2 text-zinc-600 text-[10px] font-black uppercase tracking-widest"
+              className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${app.verified ? 'text-zinc-600' : 'text-zinc-700'}`}
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-zinc-700" />
-              Verified
+              <span className={`w-1.5 h-1.5 rounded-full ${app.verified ? 'bg-zinc-700' : 'bg-zinc-800'}`} />
+              {app.verified ? 'Verified' : 'Unverified'}
             </motion.div>
           ) : (
             <motion.div
