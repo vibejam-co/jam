@@ -270,16 +270,18 @@ const App: React.FC = () => {
                   </>
                 )}
               </AnimatePresence>
-              <div onClick={handleProfileClick} className="w-8 h-8 rounded-full bg-zinc-800 border border-white/10 overflow-hidden cursor-pointer hover:border-white/30 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.05)]">
-                <img src={avatarUrl} alt={`${displayName} avatar`} className="w-full h-full object-cover" />
-              </div>
+              {authUser && (
+                <div onClick={handleProfileClick} className="w-8 h-8 rounded-full bg-zinc-800 border border-white/10 overflow-hidden cursor-pointer hover:border-white/30 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.05)]">
+                  <img src={avatarUrl} alt={`${displayName} avatar`} className="w-full h-full object-cover" />
+                </div>
+              )}
             </div>
           </div>
         </div>
       </nav>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-32 pb-20">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-40 md:pt-44 pb-20">
         <AnimatePresence mode="wait">
           {activeTab === 'Rankings' && (
             <motion.div key="rankings" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
@@ -433,7 +435,7 @@ const App: React.FC = () => {
 
           {activeTab === 'Canvas' && (
             <motion.div key="canvas" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <CanvasView />
+              <CanvasView authUser={authUser} onRequireAuth={() => setIsAuthOpen(true)} />
             </motion.div>
           )}
         </AnimatePresence>

@@ -1,5 +1,5 @@
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPortal } from 'react-dom';
 import { 
@@ -23,6 +23,8 @@ import {
   CreditCard
 } from 'lucide-react';
 import CanvasOnboarding from './CanvasOnboarding';
+import CanvasPublishTransition from './CanvasPublishTransition';
+import CanvasCommandDashboard from './CanvasCommandDashboard';
 import EditorialKineticPreviewShell from './editorialKinetic/EditorialKineticPreviewShell';
 import MidnightZenithPreviewShell from './midnightZenith/MidnightZenithPreviewShell';
 import CreatorHubPreviewShell from './creatorHub/CreatorHubPreviewShell';
@@ -34,8 +36,16 @@ import CollageOsCollectionPreviewShell from './collection/CollageOsCollectionPre
 import TerrariumCollectionPreviewShell from './collection/TerrariumCollectionPreviewShell';
 import PrismOsCollectionPreviewShell from './collection/PrismOsCollectionPreviewShell';
 import AeroCanvasCollectionPreviewShell from './collection/AeroCanvasCollectionPreviewShell';
-import { fetchCanvasCatalog, saveCanvasOnboarding } from '../lib/api';
-import type { CanvasCatalogResponse, CanvasPublishResult, CanvasTemplate, CanvasTheme } from '../types';
+import { fetchCanvasCatalog, fetchMyCanvasSession, saveCanvasOnboarding } from '../lib/api';
+import type {
+  CanvasCatalogResponse,
+  CanvasDashboardSession,
+  CanvasOnboardingPayload,
+  CanvasPublishResult,
+  CanvasTemplate,
+  CanvasTheme,
+} from '../types';
+import type { User } from '@supabase/supabase-js';
 
 const FALLBACK_THEME_COLOR_CLASSES = [
   'from-cyan-500/20 via-blue-500/10 to-transparent',
@@ -68,6 +78,103 @@ const normalizeSlug = (value: string): string =>
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 48);
+
+const LEGACY_DASHBOARD_SESSION_KEY = 'vibejam.canvas.dashboard-session.v1';
+const DASHBOARD_SESSION_STORAGE_PREFIX = 'vibejam.canvas.dashboard-session.v2';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const parseLegacyDashboardSession = (value: unknown): CanvasDashboardSession | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const onboarding = value.onboarding;
+  const publish = value.publish;
+  if (!isRecord(onboarding) || !isRecord(publish)) {
+    return null;
+  }
+
+  if (
+    typeof onboarding.claimedName !== 'string' ||
+    typeof onboarding.selectedTheme !== 'string' ||
+    !isRecord(onboarding.profile) ||
+    typeof onboarding.profile.name !== 'string' ||
+    typeof onboarding.profile.bio !== 'string' ||
+    typeof onboarding.profile.avatar !== 'string' ||
+    !Array.isArray(onboarding.selectedSignals) ||
+    !isRecord(onboarding.links) ||
+    typeof publish.profileId !== 'string' ||
+    typeof publish.slug !== 'string' ||
+    typeof publish.url !== 'string' ||
+    typeof publish.publishedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    onboarding: {
+      claimedName: onboarding.claimedName,
+      vanitySlug: typeof onboarding.vanitySlug === 'string' ? onboarding.vanitySlug : onboarding.claimedName,
+      profile: {
+        name: onboarding.profile.name,
+        bio: onboarding.profile.bio,
+        avatar: onboarding.profile.avatar,
+      },
+      selectedTheme: onboarding.selectedTheme,
+      selectedTemplateId:
+        typeof onboarding.selectedTemplateId === 'string' ? onboarding.selectedTemplateId : undefined,
+      selectedSignals: onboarding.selectedSignals.filter(
+        (signal): signal is string => typeof signal === 'string',
+      ),
+      links: Object.fromEntries(
+        Object.entries(onboarding.links).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        ),
+      ),
+    },
+    publish: {
+      success: true,
+      profileId: publish.profileId,
+      slug: publish.slug,
+      url: publish.url,
+      publishedAt: publish.publishedAt,
+    },
+  };
+};
+
+const getDashboardSessionStorageKey = (userId: string): string =>
+  `${DASHBOARD_SESSION_STORAGE_PREFIX}.${userId}`;
+
+const readDashboardSessionFromStorage = (userId: string): CanvasDashboardSession | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(getDashboardSessionStorageKey(userId));
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return parseLegacyDashboardSession(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+};
+
+const writeDashboardSessionToStorage = (userId: string, session: CanvasDashboardSession) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(getDashboardSessionStorageKey(userId), JSON.stringify(session));
+  } catch {
+    // Storage errors should never block dashboard access.
+  }
+};
 
 type CanvasThemePreview = CanvasTheme & {
   previewColor: string;
@@ -413,7 +520,12 @@ const CollectionTemplatePreview: React.FC<{
   );
 };
 
-const CanvasView: React.FC = () => {
+interface CanvasViewProps {
+  authUser: User | null;
+  onRequireAuth?: () => void;
+}
+
+const CanvasView: React.FC<CanvasViewProps> = ({ authUser, onRequireAuth }) => {
   const [catalog, setCatalog] = useState<CanvasCatalogResponse | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [isCatalogLoading, setIsCatalogLoading] = useState(true);
@@ -426,6 +538,16 @@ const CanvasView: React.FC = () => {
   const [isSavingOnboarding, setIsSavingOnboarding] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishResult, setPublishResult] = useState<CanvasPublishResult | null>(null);
+  const [dashboardSession, setDashboardSession] = useState<CanvasDashboardSession | null>(null);
+  const [isLaunchTransitionVisible, setIsLaunchTransitionVisible] = useState(false);
+  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
+  const [needsSlugInput, setNeedsSlugInput] = useState(false);
+  const slugInputRef = useRef<HTMLInputElement | null>(null);
+  const dashboardSessionRef = useRef<CanvasDashboardSession | null>(null);
+
+  useEffect(() => {
+    dashboardSessionRef.current = dashboardSession;
+  }, [dashboardSession]);
 
   useEffect(() => {
     let cancelled = false;
@@ -458,22 +580,145 @@ const CanvasView: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadServerCanvasSession = async () => {
+      if (!authUser) {
+        return;
+      }
+
+      const localSession = readDashboardSessionFromStorage(authUser.id);
+      if (localSession && !cancelled) {
+        dashboardSessionRef.current = localSession;
+        setDashboardSession(localSession);
+        setPublishResult(localSession.publish);
+        setClaimedUsername(localSession.publish.slug);
+        setSelectedTheme((prev) => prev ?? localSession.onboarding.selectedTheme ?? null);
+        setSelectedTemplate((prev) => prev ?? localSession.onboarding.selectedTemplateId ?? null);
+      }
+
+      try {
+        const data = await fetchMyCanvasSession();
+        if (cancelled) {
+          return;
+        }
+
+        if (data.session) {
+          dashboardSessionRef.current = data.session;
+          setDashboardSession(data.session);
+          setPublishResult(data.session.publish);
+          setClaimedUsername(data.session.publish.slug);
+          setSelectedTheme((prev) => prev ?? data.session?.onboarding.selectedTheme ?? null);
+          setSelectedTemplate((prev) => prev ?? data.session?.onboarding.selectedTemplateId ?? null);
+          writeDashboardSessionToStorage(authUser.id, data.session);
+          setCatalogError((prev) => (prev === 'Failed to load your Canvas workspace.' ? null : prev));
+        } else {
+          let migratedSession: CanvasDashboardSession | null = null;
+
+          if (typeof window !== 'undefined') {
+            const keysToCheck = [
+              `${LEGACY_DASHBOARD_SESSION_KEY}.${authUser.id}`,
+              LEGACY_DASHBOARD_SESSION_KEY,
+            ];
+            for (const key of keysToCheck) {
+              const raw = window.localStorage.getItem(key);
+              if (!raw) {
+                continue;
+              }
+
+              try {
+                migratedSession = parseLegacyDashboardSession(JSON.parse(raw));
+              } catch {
+                migratedSession = null;
+              }
+              if (!migratedSession) {
+                continue;
+              }
+
+              window.localStorage.removeItem(key);
+              break;
+            }
+          }
+
+          if (migratedSession) {
+            dashboardSessionRef.current = migratedSession;
+            setDashboardSession(migratedSession);
+            setPublishResult(migratedSession.publish);
+            setClaimedUsername(migratedSession.publish.slug);
+            setSelectedTheme((prev) => prev ?? migratedSession?.onboarding.selectedTheme ?? null);
+            setSelectedTemplate((prev) => prev ?? migratedSession?.onboarding.selectedTemplateId ?? null);
+            writeDashboardSessionToStorage(authUser.id, migratedSession);
+
+            saveCanvasOnboarding(migratedSession.onboarding)
+              .then((result) => {
+                if (cancelled) {
+                  return;
+                }
+                const persistedSession = { onboarding: migratedSession.onboarding, publish: result };
+                dashboardSessionRef.current = persistedSession;
+                setDashboardSession(persistedSession);
+                setPublishResult(result);
+                setClaimedUsername(result.slug);
+                writeDashboardSessionToStorage(authUser.id, persistedSession);
+              })
+              .catch(() => {
+                // Keep migrated in-memory session; user can still continue in dashboard.
+              });
+          } else {
+            if (!dashboardSessionRef.current) {
+              setDashboardSession(null);
+              setPublishResult(null);
+              setClaimedUsername('');
+            }
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          if (!dashboardSessionRef.current) {
+            setDashboardSession(null);
+            setPublishResult(null);
+            setClaimedUsername('');
+          }
+          setCatalogError((prev) =>
+            prev ?? (error instanceof Error ? error.message : 'Failed to load your Canvas workspace.'),
+          );
+        }
+      }
+    };
+
+    loadServerCanvasSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser]);
+
+  useEffect(() => {
+    if (authUser) {
+      return;
+    }
+
+    if (isOnboarding || isLaunchTransitionVisible || isDashboardOpen) {
+      return;
+    }
+
+    dashboardSessionRef.current = null;
+    setDashboardSession(null);
+    setPublishResult(null);
+    setClaimedUsername('');
+    setIsDashboardOpen(false);
+    setIsLaunchTransitionVisible(false);
+  }, [authUser, isDashboardOpen, isLaunchTransitionVisible, isOnboarding]);
+
+  useEffect(() => {
+    if (isLaunchTransitionVisible && !dashboardSession) {
+      setIsLaunchTransitionVisible(false);
+    }
+  }, [dashboardSession, isLaunchTransitionVisible]);
+
   const themes = catalog?.themes ?? [];
   const templates = catalog?.templates ?? [];
-  const featuredFrameworks = catalog?.featuredFrameworks ?? themes.slice(0, 6);
-  const onboardingFrameworks = useMemo(() => {
-    if (!selectedTheme) {
-      return featuredFrameworks;
-    }
-
-    const selected = themes.find((theme) => theme.id === selectedTheme);
-    if (!selected || featuredFrameworks.some((theme) => theme.id === selected.id)) {
-      return featuredFrameworks;
-    }
-
-    return [selected, ...featuredFrameworks.slice(0, 5)];
-  }, [featuredFrameworks, selectedTheme, themes]);
-
   const themesForDisplay = useMemo<CanvasThemePreview[]>(
     () =>
       themes.map((theme, index) => {
@@ -488,6 +733,18 @@ const CanvasView: React.FC = () => {
       }),
     [themes],
   );
+  const onboardingFrameworks = useMemo(() => {
+    if (!selectedTheme) {
+      return themesForDisplay;
+    }
+
+    const selected = themesForDisplay.find((theme) => theme.id === selectedTheme);
+    if (!selected) {
+      return themesForDisplay;
+    }
+
+    return [selected, ...themesForDisplay.filter((theme) => theme.id !== selected.id)];
+  }, [selectedTheme, themesForDisplay]);
   const landingThemes = useMemo(() => themesForDisplay.slice(0, 5), [themesForDisplay]);
   const landingTemplates = useMemo(() => templates.slice(0, 6), [templates]);
   const activePreviewTheme = useMemo(
@@ -500,6 +757,34 @@ const CanvasView: React.FC = () => {
   );
 
   const claimedSlug = normalizeSlug(claimedUsername);
+
+  const openDashboard = useCallback(() => {
+    if (!dashboardSession) {
+      return;
+    }
+
+    setPublishError(null);
+    setIsOnboarding(false);
+    setIsLaunchTransitionVisible(false);
+    setIsDashboardOpen(true);
+  }, [dashboardSession]);
+
+  useEffect(() => {
+    if (!dashboardSession) {
+      return;
+    }
+
+    if (isOnboarding || isLaunchTransitionVisible || isDashboardOpen) {
+      return;
+    }
+
+    setIsDashboardOpen(true);
+  }, [
+    dashboardSession,
+    isDashboardOpen,
+    isLaunchTransitionVisible,
+    isOnboarding,
+  ]);
 
   useEffect(() => {
     if (!activePreviewTheme && !activePreviewTemplate) {
@@ -525,6 +810,106 @@ const CanvasView: React.FC = () => {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [activePreviewTheme, activePreviewTemplate]);
+
+  useEffect(() => {
+    if (!isLaunchTransitionVisible && !isDashboardOpen) {
+      return;
+    }
+
+    const originalOverflow = document.body.style.overflow;
+    const originalOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflow = 'hidden';
+    document.body.style.overscrollBehavior = 'none';
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.overscrollBehavior = originalOverscroll;
+    };
+  }, [isLaunchTransitionVisible, isDashboardOpen]);
+
+  const focusSlugInput = useCallback(() => {
+    slugInputRef.current?.focus();
+    slugInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
+
+  const handleClaimCanvas = useCallback(() => {
+    if (!authUser) {
+      onRequireAuth?.();
+      return;
+    }
+
+    if (isCatalogLoading || onboardingFrameworks.length === 0) {
+      return;
+    }
+
+    if (!claimedSlug) {
+      setNeedsSlugInput(true);
+      focusSlugInput();
+      return;
+    }
+
+    setNeedsSlugInput(false);
+    setPublishError(null);
+    setIsOnboarding(true);
+  }, [authUser, claimedSlug, focusSlugInput, isCatalogLoading, onRequireAuth, onboardingFrameworks.length]);
+
+  const handleEnterDashboard = useCallback(async () => {
+    const availableSession = dashboardSession ?? dashboardSessionRef.current;
+    if (availableSession) {
+      if (!dashboardSession) {
+        dashboardSessionRef.current = availableSession;
+        setDashboardSession(availableSession);
+        setPublishResult(availableSession.publish);
+        setClaimedUsername(availableSession.publish.slug);
+      }
+      setPublishError(null);
+      setIsLaunchTransitionVisible(false);
+      setIsOnboarding(false);
+      setIsDashboardOpen(true);
+      return;
+    }
+
+    if (!authUser) {
+      onRequireAuth?.();
+      setPublishError('Sign in required to load your Canvas dashboard.');
+      return;
+    }
+
+    try {
+      const data = await fetchMyCanvasSession();
+      if (data.session) {
+        dashboardSessionRef.current = data.session;
+        setDashboardSession(data.session);
+        setPublishResult(data.session.publish);
+        setClaimedUsername(data.session.publish.slug);
+        writeDashboardSessionToStorage(authUser.id, data.session);
+        setPublishError(null);
+        setIsLaunchTransitionVisible(false);
+        setIsDashboardOpen(true);
+        return;
+      }
+    } catch (error) {
+      setPublishError(error instanceof Error ? error.message : 'Unable to load your Canvas dashboard.');
+    }
+
+    const localSession = readDashboardSessionFromStorage(authUser.id);
+    if (localSession) {
+      dashboardSessionRef.current = localSession;
+      setDashboardSession(localSession);
+      setPublishResult(localSession.publish);
+      setClaimedUsername(localSession.publish.slug);
+      setPublishError(null);
+      setIsLaunchTransitionVisible(false);
+      setIsDashboardOpen(true);
+      return;
+    }
+
+    setIsLaunchTransitionVisible(false);
+  }, [authUser, dashboardSession, onRequireAuth, openDashboard]);
+
+  const handleCloseDashboard = useCallback(() => {
+    setIsDashboardOpen(false);
+  }, []);
 
   const renderThemePreview = () => {
     if (!activePreviewTheme) {
@@ -663,11 +1048,21 @@ const CanvasView: React.FC = () => {
           >
             <div className="relative w-full sm:w-80 group">
               <input 
+                ref={slugInputRef}
                 type="text" 
                 placeholder="vibejam.co/yourname"
                 value={claimedUsername}
-                onChange={(e) => setClaimedUsername(e.target.value)}
-                className="w-full h-14 bg-white/5 border border-white/10 rounded-2xl px-6 text-white font-mono-data focus:outline-none focus:ring-1 focus:ring-white/30 transition-all"
+                onChange={(e) => {
+                  setClaimedUsername(e.target.value);
+                  if (needsSlugInput) {
+                    setNeedsSlugInput(false);
+                  }
+                }}
+                className={`w-full h-14 bg-white/5 border rounded-2xl px-6 text-white font-mono-data focus:outline-none focus:ring-1 transition-all ${
+                  needsSlugInput
+                    ? 'border-amber-400/70 focus:ring-amber-300/50'
+                    : 'border-white/10 focus:ring-white/30'
+                }`}
               />
               <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-50 group-hover:opacity-100 transition-opacity">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
@@ -675,14 +1070,21 @@ const CanvasView: React.FC = () => {
               </div>
             </div>
             <button
-              disabled={!claimedSlug || onboardingFrameworks.length === 0 || isCatalogLoading}
-              onClick={() => claimedSlug && onboardingFrameworks.length > 0 && setIsOnboarding(true)}
+              disabled={isCatalogLoading}
+              onClick={handleClaimCanvas}
               className="h-14 px-8 rounded-2xl bg-white text-black font-black uppercase tracking-tight hover:bg-zinc-200 transition-all flex items-center gap-2 w-full sm:w-auto justify-center"
             >
-              {isCatalogLoading ? 'Loading Canvas...' : 'Claim My Canvas'} <ArrowRight className="w-4 h-4" />
+              {isCatalogLoading ? 'Loading Canvas...' : authUser ? 'Claim My Canvas' : 'Sign In To Claim'} <ArrowRight className="w-4 h-4" />
             </button>
           </motion.div>
-          {claimedSlug && <p className="mt-3 text-xs text-zinc-500 font-mono-data">Publishing as `https://vibejam.co/{claimedSlug}`</p>}
+          {claimedSlug && (
+            <p className="mt-3 text-xs text-zinc-500 font-mono-data">
+              Publishing as `https://vibejam.co/{claimedSlug}`
+            </p>
+          )}
+          {needsSlugInput && authUser && (
+            <p className="mt-2 text-xs text-amber-300">Enter your Canvas name to continue.</p>
+          )}
         </div>
 
         {/* Floating Preview Asset (Mobile Mockup-like) */}
@@ -877,17 +1279,15 @@ const CanvasView: React.FC = () => {
          </div>
          <h2 className="text-4xl md:text-6xl font-extrabold text-white tracking-tighter mb-6 leading-tight">Your digital storefront, <br />vibe-coded in seconds.</h2>
          <p className="text-zinc-500 text-lg md:text-xl max-w-xl mb-12 font-medium italic">Stop building landing pages from scratch. Claim your canvas and let your work do the talking.</p>
-         <button className="px-12 py-5 rounded-2xl bg-white text-black font-black uppercase tracking-widest hover:scale-105 transition-all flex items-center gap-3">
+         <button
+           type="button"
+           onClick={handleClaimCanvas}
+           disabled={isCatalogLoading}
+           className="px-12 py-5 rounded-2xl bg-white text-black font-black uppercase tracking-widest hover:scale-105 transition-all flex items-center gap-3 disabled:opacity-60 disabled:cursor-not-allowed"
+         >
            Start My Canvas For Free <Rocket className="w-5 h-5" />
          </button>
       </div>
-
-      {publishResult && (
-        <div className="p-6 rounded-3xl border border-emerald-500/30 bg-emerald-500/10">
-          <p className="text-emerald-200 font-bold text-sm">Canvas published successfully.</p>
-          <p className="text-emerald-100 font-mono-data text-sm mt-1">{publishResult.url}</p>
-        </div>
-      )}
 
       {catalogError && (
         <div className="p-6 rounded-3xl border border-yellow-500/30 bg-yellow-500/10">
@@ -906,34 +1306,68 @@ const CanvasView: React.FC = () => {
         )}
 
       {/* ONBOARDING FLOW OVERLAY */}
-      <AnimatePresence>
-        {isOnboarding && (
-          <CanvasOnboarding 
-            claimedName={claimedSlug}
-            vanitySlug={claimedSlug}
-            frameworks={onboardingFrameworks}
-            initialThemeId={selectedTheme ?? undefined}
-            selectedTemplateId={selectedTemplate ?? undefined}
-            isPublishing={isSavingOnboarding}
-            publishError={publishError}
-            onClose={() => setIsOnboarding(false)}
-            onComplete={async (data) => {
-              setIsSavingOnboarding(true);
-              setPublishError(null);
-              try {
-                const result = await saveCanvasOnboarding(data);
-                setPublishResult(result);
-                setClaimedUsername(result.slug);
-                setIsOnboarding(false);
-              } catch (error) {
-                setPublishError(error instanceof Error ? error.message : 'Failed to publish Canvas artifact.');
-              } finally {
-                setIsSavingOnboarding(false);
-              }
-            }}
-          />
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {isOnboarding && (
+              <CanvasOnboarding
+                claimedName={claimedSlug}
+                vanitySlug={claimedSlug}
+                frameworks={onboardingFrameworks}
+                initialThemeId={selectedTheme ?? undefined}
+                selectedTemplateId={selectedTemplate ?? undefined}
+                isPublishing={isSavingOnboarding}
+                publishError={publishError}
+                onClose={() => {
+                  setPublishError(null);
+                  setIsOnboarding(false);
+                }}
+                onComplete={async (data) => {
+                  setIsSavingOnboarding(true);
+                  setPublishError(null);
+                  try {
+                    const result = await saveCanvasOnboarding(data);
+                    const nextSession = { onboarding: data, publish: result };
+                    dashboardSessionRef.current = nextSession;
+                    setPublishResult(result);
+                    setClaimedUsername(result.slug);
+                    setDashboardSession(nextSession);
+                    if (authUser) {
+                      writeDashboardSessionToStorage(authUser.id, nextSession);
+                    }
+                    setIsDashboardOpen(false);
+                    setIsLaunchTransitionVisible(true);
+                    setIsOnboarding(false);
+                  } catch (error) {
+                    setPublishError(error instanceof Error ? error.message : 'Failed to publish Canvas.');
+                  } finally {
+                    setIsSavingOnboarding(false);
+                  }
+                }}
+              />
+            )}
+          </AnimatePresence>,
+          document.body,
         )}
-      </AnimatePresence>
+
+      {/* POST-PUBLISH LAUNCH EXPERIENCE */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <AnimatePresence>
+            {isLaunchTransitionVisible && dashboardSession && (
+              <CanvasPublishTransition publish={dashboardSession.publish} onContinue={handleEnterDashboard} />
+            )}
+            {isDashboardOpen && dashboardSession && (
+              <CanvasCommandDashboard
+                onboarding={dashboardSession.onboarding}
+                publish={dashboardSession.publish}
+                themes={themesForDisplay}
+                onClose={handleCloseDashboard}
+              />
+            )}
+          </AnimatePresence>,
+          document.body,
+        )}
 
     </div>
   );

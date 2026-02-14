@@ -111,3 +111,20 @@ export interface CanvasPublishResult {
   url: string;
   publishedAt: string;
 }
+
+export interface CanvasDashboardSession {
+  onboarding: CanvasOnboardingPayload;
+  publish: CanvasPublishResult;
+}
+
+export interface CanvasOwnedProfile {
+  profileId: string;
+  slug: string;
+  url: string;
+  publishedAt: string;
+}
+
+export interface CanvasSessionResponse {
+  session: CanvasDashboardSession | null;
+  profiles: CanvasOwnedProfile[];
+}

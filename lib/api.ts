@@ -1,10 +1,12 @@
 import type {
   CanvasCatalogResponse,
+  CanvasSessionResponse,
   CanvasOnboardingPayload,
   CanvasPublishResult,
   Notification,
   VibeApp,
 } from '../types';
+import { supabase } from './supabase-client';
 
 type ApiResponse<T> = {
   data: T;
@@ -13,12 +15,22 @@ type ApiResponse<T> = {
 };
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const headers = new Headers(init?.headers ?? {});
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  if (supabase) {
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (accessToken) {
+      headers.set('Authorization', `Bearer ${accessToken}`);
+    }
+  }
+
   const response = await fetch(path, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
 
   const contentType = response.headers.get('content-type') ?? '';
@@ -65,3 +77,6 @@ export const saveCanvasOnboarding = (payload: CanvasOnboardingPayload) =>
   });
 
 export const fetchCanvasCatalog = () => request<CanvasCatalogResponse>('/api/canvas');
+
+export const fetchMyCanvasSession = () =>
+  request<CanvasSessionResponse>('/api/canvas?mode=session');
