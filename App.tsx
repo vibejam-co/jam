@@ -435,7 +435,16 @@ const App: React.FC = () => {
 
           {activeTab === 'Canvas' && (
             <motion.div key="canvas" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <CanvasView authUser={authUser} onRequireAuth={() => setIsAuthOpen(true)} />
+              <CanvasView
+                authUser={authUser}
+                onRequireAuth={() => setIsAuthOpen(true)}
+                onNavigateMainTab={setActiveTab}
+                onOpenProfile={handleProfileClick}
+                onToggleNotifications={() => setIsNotificationsOpen((prev) => !prev)}
+                onOpenStartJam={() => setIsStartJamOpen(true)}
+                unreadCount={unreadCount}
+                isNotificationsOpen={isNotificationsOpen}
+              />
             </motion.div>
           )}
         </AnimatePresence>

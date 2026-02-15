@@ -10,9 +10,10 @@ interface GridItemProps {
   onFocus: () => void;
   onBlur: () => void;
   onClick: () => void;
+  compact?: boolean;
 }
 
-const GridItem: React.FC<GridItemProps> = ({ item, isFocused, isAnyFocused, onFocus, onBlur, onClick }) => {
+const GridItem: React.FC<GridItemProps> = ({ item, isFocused, isAnyFocused, onFocus, onBlur, onClick, compact = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isHovered, setIsHovered] = useState(false);
 
@@ -31,8 +32,8 @@ const GridItem: React.FC<GridItemProps> = ({ item, isFocused, isAnyFocused, onFo
 
   const getSpanClasses = () => {
     switch (item.type) {
-      case 'vertical': return 'row-span-2 col-span-1 aspect-[9/16]';
-      case 'horizontal': return 'col-span-1 md:col-span-2 aspect-[16/9] md:aspect-video';
+      case 'vertical': return compact ? 'col-span-1 aspect-[9/13]' : 'row-span-2 col-span-1 aspect-[9/16]';
+      case 'horizontal': return compact ? 'col-span-1 aspect-[16/10]' : 'col-span-1 md:col-span-2 aspect-[16/9] md:aspect-video';
       case 'square': return 'col-span-1 aspect-square';
       default: return '';
     }

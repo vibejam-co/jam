@@ -9,7 +9,11 @@ import { ShopBlock } from './components/ShopBlock';
 import { MusicBlock } from './components/MusicBlock';
 import { SocialBlock } from './components/SocialBlock';
 
-const App: React.FC = () => {
+interface PrismOsAppProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+const App: React.FC<PrismOsAppProps> = ({ forcedViewport }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
@@ -21,20 +25,22 @@ const App: React.FC = () => {
     mouseY.set(e.clientY - top);
   }, [mouseX, mouseY]);
 
+  const isCompact = forcedViewport === 'mobile';
+
   return (
     <div 
       ref={containerRef}
       onMouseMove={handleMouseMove}
-      className="relative min-h-screen w-full bg-black flex items-center justify-center p-4 md:p-12 overflow-hidden selection:bg-pink-500/30"
+      className={`relative min-h-screen w-full bg-black flex items-center justify-center overflow-hidden selection:bg-pink-500/30 ${isCompact ? 'p-3' : 'p-4 md:p-12'}`}
     >
       <Background />
       
       <div className="relative z-10 w-full max-w-6xl">
-        <header className="mb-12 text-center md:text-left">
+        <header className={`text-center ${isCompact ? 'mb-6' : 'mb-12 md:text-left'}`}>
           <motion.h1 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-4xl md:text-6xl font-bold tracking-tighter text-white uppercase"
+            className={`${isCompact ? 'text-3xl' : 'text-4xl md:text-6xl'} font-bold tracking-tighter text-white uppercase`}
           >
             Prism <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-white to-pink-500">OS</span>
           </motion.h1>
@@ -42,50 +48,50 @@ const App: React.FC = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.5 }}
             transition={{ delay: 0.2 }}
-            className="text-white/60 text-sm md:text-lg mt-2 uppercase tracking-[0.3em]"
+            className={`text-white/60 mt-2 uppercase tracking-[0.3em] ${isCompact ? 'text-xs' : 'text-sm md:text-lg'}`}
           >
             Optical Fidelity • VibeJam 2024
           </motion.p>
         </header>
 
-        <main className="grid grid-cols-1 md:grid-cols-4 md:grid-rows-3 gap-4 h-full">
+        <main className={`grid ${isCompact ? 'grid-cols-1 gap-3' : 'grid-cols-1 md:grid-cols-4 md:grid-rows-3 gap-4'} h-full`}>
           {/* Main Profile - Tall 2x3 */}
-          <div className="md:col-span-1 md:row-span-3">
+          <div className={isCompact ? '' : 'md:col-span-1 md:row-span-3'}>
             <PrismCard mouseX={mouseX} mouseY={mouseY}>
               <ProfileBlock />
             </PrismCard>
           </div>
 
           {/* Live Status - Wide 2x1 */}
-          <div className="md:col-span-2 md:row-span-1">
+          <div className={isCompact ? '' : 'md:col-span-2 md:row-span-1'}>
             <PrismCard mouseX={mouseX} mouseY={mouseY}>
               <LiveBlock />
             </PrismCard>
           </div>
 
           {/* Music - Square 1x1 */}
-          <div className="md:col-span-1 md:row-span-1">
+          <div className={isCompact ? '' : 'md:col-span-1 md:row-span-1'}>
             <PrismCard mouseX={mouseX} mouseY={mouseY}>
               <MusicBlock />
             </PrismCard>
           </div>
 
           {/* Shop - Square 1x2 */}
-          <div className="md:col-span-1 md:row-span-2">
+          <div className={isCompact ? '' : 'md:col-span-1 md:row-span-2'}>
             <PrismCard mouseX={mouseX} mouseY={mouseY}>
               <ShopBlock />
             </PrismCard>
           </div>
 
           {/* Socials - Long 2x1 */}
-          <div className="md:col-span-2 md:row-span-1">
+          <div className={isCompact ? '' : 'md:col-span-2 md:row-span-1'}>
             <PrismCard mouseX={mouseX} mouseY={mouseY}>
               <SocialBlock />
             </PrismCard>
           </div>
 
           {/* Bottom Utility - 2x1 (shared col) */}
-          <div className="md:col-span-2 md:row-span-1">
+          <div className={isCompact ? '' : 'md:col-span-2 md:row-span-1'}>
             <PrismCard mouseX={mouseX} mouseY={mouseY}>
               <div className="h-full w-full flex flex-col justify-end p-6 gap-2">
                 <div className="text-white/40 text-[10px] tracking-widest uppercase">System Log</div>

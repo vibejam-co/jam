@@ -18,11 +18,17 @@ const INITIAL_WIDGETS: Widget[] = [
   { id: '6', type: 'notes', title: 'Quick Catch', size: '1x1' },
 ];
 
-export const GlassOSProfile: React.FC = () => {
+interface GlassOSProfileProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+export const GlassOSProfile: React.FC<GlassOSProfileProps> = ({ forcedViewport }) => {
+  const [isCompactByWidth, setIsCompactByWidth] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const isEmbeddedPreview = Boolean(forcedViewport);
 
   useEffect(() => {
-    if (!activeId) {
+    if (!activeId || isEmbeddedPreview) {
       return;
     }
 
@@ -32,18 +38,34 @@ export const GlassOSProfile: React.FC = () => {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [activeId]);
+  }, [activeId, isEmbeddedPreview]);
+
+  useEffect(() => {
+    const checkCompact = () => setIsCompactByWidth(window.innerWidth < 768);
+    checkCompact();
+    window.addEventListener('resize', checkCompact);
+    return () => window.removeEventListener('resize', checkCompact);
+  }, []);
+
+  const isCompact = forcedViewport ? forcedViewport === 'mobile' : isCompactByWidth;
 
   return (
     <div className="relative w-full">
       {/* Grid Layout */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 md:gap-6 auto-rows-[140px] md:auto-rows-[180px]">
+      <div
+        className={`grid ${
+          isCompact
+            ? 'grid-cols-1 gap-3 auto-rows-[130px]'
+            : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 md:gap-6 auto-rows-[140px] md:auto-rows-[180px]'
+        }`}
+      >
         {INITIAL_WIDGETS.map((widget) => (
           <WidgetCard
             key={widget.id}
             widget={widget}
             isActive={activeId === widget.id}
             onActivate={setActiveId}
+            compact={isCompact}
           />
         ))}
       </div>
@@ -56,12 +78,24 @@ export const GlassOSProfile: React.FC = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setActiveId(null)}
-            className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-xl flex items-end md:items-center justify-center p-0 md:p-4"
+            className={`z-[100] bg-black/40 backdrop-blur-xl flex justify-center ${
+              isEmbeddedPreview
+                ? `absolute inset-0 ${isCompact ? 'items-end p-0' : 'items-center p-2'}`
+                : `fixed inset-0 ${isCompact ? 'items-end p-0' : 'items-end md:items-center p-0 md:p-4'}`
+            }`}
           >
             <motion.div
               layoutId={`widget-${activeId}`}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-3xl h-[92dvh] md:h-[600px] aerogel rounded-t-[28px] md:rounded-[40px] shadow-2xl overflow-hidden relative"
+              className={`w-full max-w-3xl aerogel shadow-2xl overflow-hidden relative ${
+                isEmbeddedPreview
+                  ? isCompact
+                    ? 'h-[86%] rounded-t-[24px]'
+                    : 'h-[88%] rounded-[28px]'
+                  : isCompact
+                    ? 'h-[90dvh] rounded-t-[24px]'
+                    : 'h-[92dvh] md:h-[600px] rounded-t-[28px] md:rounded-[40px]'
+              }`}
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             >
               <WidgetExpandedContent 

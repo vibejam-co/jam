@@ -2,10 +2,14 @@
 import React from 'react';
 import VibeJamProfile from './VibeJamProfile';
 
-const App: React.FC = () => {
+interface EtherealLiquidAppProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+const App: React.FC<EtherealLiquidAppProps> = ({ forcedViewport }) => {
   return (
     <div className="min-h-screen">
-      <VibeJamProfile />
+      <VibeJamProfile forcedViewport={forcedViewport} />
     </div>
   );
 };

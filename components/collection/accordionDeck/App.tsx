@@ -2,10 +2,14 @@
 import React from 'react';
 import AccordionDeck from './components/AccordionDeck';
 
-const App: React.FC = () => {
+interface AccordionDeckAppProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+const App: React.FC<AccordionDeckAppProps> = ({ forcedViewport }) => {
   return (
     <main className="min-h-screen w-full bg-black text-white selection:bg-white selection:text-black">
-      <AccordionDeck />
+      <AccordionDeck forcedViewport={forcedViewport} />
     </main>
   );
 };

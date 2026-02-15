@@ -8,11 +8,16 @@ import { GRID_ITEMS, PROFILE_DATA, CATEGORIES } from './constants';
 import { GridContent } from './types';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const App: React.FC = () => {
+interface MidnightZenithAppProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+const App: React.FC<MidnightZenithAppProps> = ({ forcedViewport }) => {
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<GridContent | null>(null);
   const [activeCategory, setActiveCategory] = useState("All");
   const [isScrolled, setIsScrolled] = useState(false);
+  const isCompact = forcedViewport === 'mobile';
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 100);
@@ -35,10 +40,10 @@ const App: React.FC = () => {
           backdropFilter: isScrolled ? 'blur(12px)' : 'blur(0px)',
           borderBottom: isScrolled ? '1px solid rgba(255, 255, 255, 0.05)' : '1px solid transparent'
         }}
-        className="fixed top-0 inset-x-0 z-[60] py-3 md:py-4 px-4 sm:px-6 md:px-12 flex justify-between items-center transition-all duration-500"
+        className={`fixed top-0 inset-x-0 z-[60] py-3 px-4 sm:px-6 flex justify-between items-center transition-all duration-500 ${isCompact ? '' : 'md:py-4 md:px-12'}`}
       >
         <div className="font-cinema font-bold text-xl tracking-tighter">VIBEJAM</div>
-        <div className="hidden md:flex gap-8">
+        <div className={`gap-8 ${isCompact ? 'hidden' : 'hidden md:flex'}`}>
           {CATEGORIES.map(cat => (
             <button
               key={cat}
@@ -54,9 +59,9 @@ const App: React.FC = () => {
         </button>
       </motion.nav>
 
-      <Header data={PROFILE_DATA} />
+      <Header data={PROFILE_DATA} compact={isCompact} />
 
-      <main className="px-3 sm:px-4 md:px-12 lg:px-24 -mt-10 md:-mt-24 pb-24 md:pb-32 relative z-20">
+      <main className={`px-3 sm:px-4 relative z-20 ${isCompact ? '-mt-8 pb-20' : 'md:px-12 lg:px-24 -mt-10 md:-mt-24 pb-24 md:pb-32'}`}>
         <div className="masonry-grid">
           <AnimatePresence mode="popLayout">
             {GRID_ITEMS.map((item) => (
@@ -68,13 +73,14 @@ const App: React.FC = () => {
                 onFocus={() => setFocusedId(item.id)}
                 onBlur={() => setFocusedId(null)}
                 onClick={() => setSelectedItem(item)}
+                compact={isCompact}
               />
             ))}
           </AnimatePresence>
         </div>
         
         {/* Mobile Category Scroller */}
-        <div className="md:hidden flex gap-4 overflow-x-auto py-8 no-scrollbar scroll-smooth">
+        <div className={`${isCompact ? 'flex' : 'md:hidden flex'} gap-4 overflow-x-auto py-8 no-scrollbar scroll-smooth`}>
           {CATEGORIES.map(cat => (
             <button
               key={cat}
@@ -93,7 +99,7 @@ const App: React.FC = () => {
         onClose={() => setSelectedItem(null)} 
       />
 
-      <footer className="py-20 md:py-24 px-4 sm:px-6 text-center border-t border-white/5">
+      <footer className={`px-4 sm:px-6 text-center border-t border-white/5 ${isCompact ? 'py-14' : 'py-20 md:py-24'}`}>
         <div className="max-w-xl mx-auto">
           <h4 className="font-cinema font-bold text-2xl md:text-3xl mb-4 tracking-tight">STAY IN THE LOOP</h4>
           <p className="text-white/40 text-xs md:text-sm font-cinema tracking-widest uppercase mb-10 md:mb-12">New drops every Friday at Midnight</p>

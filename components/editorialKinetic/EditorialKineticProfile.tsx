@@ -40,11 +40,11 @@ const EditorialKineticProfile: React.FC<EditorialKineticProfileProps> = ({ isMob
         )}
       </AnimatePresence>
 
-      <main className={`relative z-10 flex flex-col ${isMobilePreview ? '' : 'md:flex-row'}`}>
+      <main className={`relative z-10 flex flex-col ${isMobilePreview ? 'pb-4' : 'md:flex-row'}`}>
         {/* Left Side: Massive Fixed Title */}
         <section
           className={`p-8 flex flex-col justify-between pointer-events-none ${
-            isMobilePreview ? 'w-full gap-12 pb-4' : 'md:w-1/3 md:h-screen md:sticky md:top-0 md:p-12'
+            isMobilePreview ? 'w-full gap-8 pb-2 pt-6 px-5' : 'md:w-1/3 md:h-screen md:sticky md:top-0 md:p-12'
           }`}
         >
           <div>
@@ -57,13 +57,13 @@ const EditorialKineticProfile: React.FC<EditorialKineticProfileProps> = ({ isMob
           <div className={isMobilePreview ? '' : 'mt-20 md:mt-0'}>
             <h1 
               className={`font-serif-editorial italic leading-[0.85] tracking-tighter ${
-                isMobilePreview ? 'text-7xl' : 'text-7xl md:text-8xl lg:text-9xl'
+                isMobilePreview ? 'text-[3.3rem] xs:text-[4.2rem]' : 'text-7xl md:text-8xl lg:text-9xl'
               }`}
               style={{ mixBlendMode: 'difference', color: 'white' }}
             >
               THE<br />ARCHIVE
             </h1>
-            <p className="font-sans-editorial text-xs mt-6 tracking-[0.2em] opacity-80 uppercase max-w-[200px]">
+            <p className={`font-sans-editorial text-xs mt-6 tracking-[0.2em] opacity-80 uppercase ${isMobilePreview ? 'max-w-[260px]' : 'max-w-[200px]'}`}>
               A curated collection of digital experiences and tactile aesthetics.
             </p>
           </div>
@@ -91,7 +91,7 @@ const EditorialKineticProfile: React.FC<EditorialKineticProfileProps> = ({ isMob
           </div>
 
           {/* Footer Metadata - Mobile Only */}
-          <footer className={`p-8 border-t border-black ${isMobilePreview ? '' : 'md:hidden'}`}>
+          <footer className={`p-6 md:p-8 border-t border-black ${isMobilePreview ? '' : 'md:hidden'}`}>
             <p className="font-sans-editorial text-[10px] tracking-[0.2em] uppercase opacity-40">
               EST. 2025 &copy; ALL RIGHTS RESERVED
             </p>
@@ -100,7 +100,7 @@ const EditorialKineticProfile: React.FC<EditorialKineticProfileProps> = ({ isMob
       </main>
 
       {/* Decorative Branding */}
-      <div className={`${isMobilePreview ? 'absolute bottom-8 right-8' : 'fixed bottom-12 left-12 md:left-auto md:right-12'} z-50 pointer-events-none`}>
+      <div className={`${isMobilePreview ? 'relative mt-2 mb-6 px-5' : 'fixed bottom-12 left-12 md:left-auto md:right-12'} z-50 pointer-events-none`}>
         <div className="flex items-center gap-4">
           <span className="font-sans-editorial text-[10px] tracking-widest uppercase opacity-60">
             Scroll to explore

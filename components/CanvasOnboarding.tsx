@@ -9,6 +9,11 @@ import {
   Layout, Eye, Send, Smartphone
 } from 'lucide-react';
 import { CanvasOnboardingPayload, CanvasTheme } from '../types';
+import MidnightZenithApp from './midnightZenith/App';
+import EditorialKineticProfile from './editorialKinetic/EditorialKineticProfile';
+import CreatorHubApp from './creatorHub/App';
+import EtherealLiquidApp from './etherealLiquid/App';
+import GlassArtifactApp from './glassArtifact/App';
 
 interface CanvasOnboardingProps {
   claimedName: string;
@@ -18,6 +23,8 @@ interface CanvasOnboardingProps {
   selectedTemplateId?: string;
   isPublishing?: boolean;
   publishError?: string | null;
+  onThemeChange?: (themeId: string) => void;
+  onPreviewTheme?: (themeId: string) => void;
   onClose: () => void;
   onComplete: (data: CanvasOnboardingPayload) => void | Promise<void>;
 }
@@ -33,6 +40,102 @@ const SIGNALS = [
   { id: 'store', name: 'Storefront', icon: ShoppingBag, color: '#D4AF37' },
 ];
 
+type PreviewThemeMode = 'midnight' | 'editorial' | 'brutalist' | 'aurora' | 'glass' | 'retro';
+
+const ACCENT_COLOR_MAP: Record<string, string> = {
+  'cyan-400': '#22d3ee',
+  'yellow-400': '#facc15',
+  'rose-500': '#f43f5e',
+  'purple-500': '#a855f7',
+  'blue-400': '#60a5fa',
+  'green-400': '#4ade80',
+  'orange-400': '#fb923c',
+  'fuchsia-400': '#e879f9',
+  'amber-300': '#fcd34d',
+  'emerald-400': '#34d399',
+  'zinc-300': '#d4d4d8',
+  'sky-300': '#7dd3fc',
+  'violet-400': '#a78bfa',
+  'lime-400': '#a3e635',
+  'cyan-300': '#67e8f9',
+  'indigo-300': '#a5b4fc',
+  'blue-300': '#93c5fd',
+  'stone-300': '#d6d3d1',
+  'teal-300': '#5eead4',
+  'violet-300': '#c4b5fd',
+  'yellow-300': '#fde047',
+  'slate-300': '#cbd5e1',
+};
+
+const getThemePreviewMode = (themeId: string): PreviewThemeMode => {
+  if (
+    themeId.includes('editorial')
+    || themeId.includes('monarch')
+    || themeId.includes('newsroom')
+    || themeId.includes('press')
+  ) {
+    return 'editorial';
+  }
+  if (
+    themeId.includes('concrete')
+    || themeId.includes('brutal')
+    || themeId.includes('carbon')
+    || themeId.includes('blacksmith')
+  ) {
+    return 'brutalist';
+  }
+  if (
+    themeId.includes('aurora')
+    || themeId.includes('halo')
+    || themeId.includes('atlas')
+    || themeId.includes('sonic')
+  ) {
+    return 'aurora';
+  }
+  if (
+    themeId.includes('glass')
+    || themeId.includes('prism')
+    || themeId.includes('sapphire')
+    || themeId.includes('opal')
+    || themeId.includes('obsidian')
+    || themeId.includes('midnight')
+  ) {
+    return 'glass';
+  }
+  if (
+    themeId.includes('retro')
+    || themeId.includes('chrome')
+    || themeId.includes('terminal')
+    || themeId.includes('grid')
+  ) {
+    return 'retro';
+  }
+  return 'midnight';
+};
+
+const formatPreviewLink = (raw: string | undefined | null): string => {
+  if (typeof raw !== 'string') {
+    return '';
+  }
+
+  if (!raw.trim()) {
+    return '';
+  }
+
+  const value = raw.trim();
+  if (value.startsWith('@')) {
+    return value;
+  }
+
+  try {
+    const parsed = new URL(value.startsWith('http') ? value : `https://${value}`);
+    const path = parsed.pathname !== '/' ? parsed.pathname : '';
+    return `${parsed.hostname.replace(/^www\./, '')}${path}`.slice(0, 40);
+  } catch {
+    return value.slice(0, 40);
+  }
+};
+
 const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
   claimedName,
   vanitySlug,
@@ -41,6 +144,8 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
   selectedTemplateId,
   isPublishing = false,
   publishError = null,
+  onThemeChange,
+  onPreviewTheme,
   onClose,
   onComplete,
 }) => {
@@ -59,6 +164,34 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
     () => frameworks.find((theme) => theme.id === selectedTheme) ?? frameworks[0],
     [frameworks, selectedTheme],
   );
+  const previewMode = useMemo<PreviewThemeMode>(
+    () => getThemePreviewMode(activeTheme?.id ?? ''),
+    [activeTheme?.id],
+  );
+  const isEditorialPreview = previewMode === 'editorial';
+  const isBrutalistPreview = previewMode === 'brutalist';
+  const isAuroraPreview = previewMode === 'aurora';
+  const accentColor = useMemo(
+    () => ACCENT_COLOR_MAP[activeTheme?.accent ?? ''] ?? '#ffffff',
+    [activeTheme?.accent],
+  );
+  const previewSignals = useMemo(
+    () =>
+      selectedSignals
+        .map((id) => {
+          const signal = SIGNALS.find((item) => item.id === id);
+          if (!signal) {
+            return null;
+          }
+          return {
+            ...signal,
+            label: formatPreviewLink(links[id]) || signal.name,
+          };
+        })
+        .filter((item): item is (typeof SIGNALS)[number] & { label: string } => Boolean(item))
+        .slice(0, 5),
+    [links, selectedSignals],
+  );
 
   useEffect(() => {
     if (frameworks.length === 0) {
@@ -69,6 +202,16 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
       setSelectedTheme(frameworks[0].id);
     }
   }, [frameworks, selectedTheme]);
+
+  useEffect(() => {
+    if (!initialThemeId || initialThemeId === selectedTheme) {
+      return;
+    }
+
+    if (frameworks.some((theme) => theme.id === initialThemeId)) {
+      setSelectedTheme(initialThemeId);
+    }
+  }, [frameworks, initialThemeId, selectedTheme]);
 
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
@@ -119,6 +262,116 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
 
   const handleLinkChange = (id: string, val: string) => {
     setLinks(prev => ({ ...prev, [id]: val }));
+  };
+
+  const handleThemeSelect = (themeId: string) => {
+    setSelectedTheme(themeId);
+    onThemeChange?.(themeId);
+  };
+
+  const handleOpenInteractivePreview = () => {
+    if (!selectedTheme) {
+      return;
+    }
+    onPreviewTheme?.(selectedTheme);
+  };
+
+  const renderInteractiveDesktopPreview = () => {
+    if (isEditorialPreview) {
+      return (
+        <div className="h-[560px] overflow-hidden bg-[#F0F0F0] text-black">
+          <EditorialKineticProfile />
+        </div>
+      );
+    }
+
+    if (isAuroraPreview) {
+      return (
+        <div className="h-[560px] overflow-auto bg-[#F0F4F8]">
+          <EtherealLiquidApp forcedViewport="desktop" />
+        </div>
+      );
+    }
+
+    if (isBrutalistPreview) {
+      return (
+        <div className="h-[560px] overflow-auto bg-[#FDFBF7]">
+          <CreatorHubApp
+            forcedViewport="desktop"
+            profileOverride={{
+              name: profile.name,
+              bio: profile.bio,
+              avatar: profile.avatar,
+            }}
+            linksOverride={links}
+            slugOverride={vanitySlug || claimedName}
+          />
+        </div>
+      );
+    }
+
+    if (previewMode === 'glass') {
+      return (
+        <div className="h-[560px] overflow-auto bg-[#050505]">
+          <GlassArtifactApp forcedViewport="desktop" />
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-[560px] overflow-auto bg-[#050505]">
+        <MidnightZenithApp forcedViewport="desktop" />
+      </div>
+    );
+  };
+
+  const renderInteractiveMobilePreview = () => {
+    if (isEditorialPreview) {
+      return (
+        <div className="h-full overflow-hidden bg-[#F0F0F0] text-black">
+          <EditorialKineticProfile isMobilePreview />
+        </div>
+      );
+    }
+
+    if (isAuroraPreview) {
+      return (
+        <div className="h-full overflow-auto bg-[#F0F4F8]">
+          <EtherealLiquidApp forcedViewport="mobile" />
+        </div>
+      );
+    }
+
+    if (isBrutalistPreview) {
+      return (
+        <div className="h-full overflow-auto bg-[#FDFBF7]">
+          <CreatorHubApp
+            forcedViewport="mobile"
+            profileOverride={{
+              name: profile.name,
+              bio: profile.bio,
+              avatar: profile.avatar,
+            }}
+            linksOverride={links}
+            slugOverride={vanitySlug || claimedName}
+          />
+        </div>
+      );
+    }
+
+    if (previewMode === 'glass') {
+      return (
+        <div className="h-full overflow-auto bg-[#050505]">
+          <GlassArtifactApp forcedViewport="mobile" />
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-full overflow-auto bg-[#050505]">
+        <MidnightZenithApp forcedViewport="mobile" />
+      </div>
+    );
   };
 
   return (
@@ -185,7 +438,7 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
                 <h2 className="text-4xl md:text-6xl font-extrabold tracking-tighter text-white mb-6 leading-[1.1]">
                   Select your <br/><span className="italic font-serif-rank text-[#D4AF37]">Visual Framework</span>
                 </h2>
-                <p className="text-zinc-400 text-lg font-medium">Pick the look you want. You can change it any time.</p>
+                <p className="text-zinc-400 text-lg font-medium">Preview full themes before selecting. You can change it any time.</p>
               </div>
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
@@ -197,7 +450,7 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
                 {frameworks.map((f) => (
                   <button
                     key={f.id}
-                    onClick={() => setSelectedTheme(f.id)}
+                    onClick={() => handleThemeSelect(f.id)}
                     className={`group relative aspect-[7/8] rounded-[36px] overflow-hidden border-2 transition-all duration-700
                       ${selectedTheme === f.id ? 'border-white scale-[1.01] shadow-[0_0_60px_rgba(255,255,255,0.1)]' : 'border-white/5 hover:border-white/20'}`}
                   >
@@ -211,6 +464,32 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
                     <div className="absolute bottom-7 left-7 right-7 text-left">
                       <h4 className="text-white font-black uppercase tracking-widest text-base sm:text-lg mb-2">{f.name}</h4>
                       <p className="text-zinc-300 text-xs font-medium leading-relaxed group-hover:text-zinc-100 transition-colors">{f.desc}</p>
+                      <div className="mt-4 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onPreviewTheme?.(f.id);
+                          }}
+                          className="h-9 px-4 rounded-lg border border-white/20 bg-black/35 text-[10px] font-black uppercase tracking-widest text-white hover:bg-white hover:text-black transition-all"
+                        >
+                          Preview
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleThemeSelect(f.id);
+                          }}
+                          className={`h-9 px-4 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                            selectedTheme === f.id
+                              ? 'bg-white text-black'
+                              : 'bg-white/10 text-white hover:bg-white/20'
+                          }`}
+                        >
+                          {selectedTheme === f.id ? 'Selected' : 'Select'}
+                        </button>
+                      </div>
                     </div>
                     {selectedTheme === f.id && (
                       <motion.div layoutId="active-check" className="absolute top-6 right-6 w-10 h-10 rounded-full bg-white text-black flex items-center justify-center shadow-2xl">
@@ -416,48 +695,7 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
                       </div>
                       <p className="text-[10px] uppercase tracking-[0.22em] text-zinc-500">desktop preview</p>
                     </div>
-                    <div className="relative min-h-[340px] sm:min-h-[400px] p-8">
-                      <img
-                        src={activeTheme?.previewImg}
-                        className="absolute inset-0 w-full h-full object-cover opacity-25 grayscale"
-                        alt={activeTheme?.name ?? 'Theme preview'}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/65 to-black/95" />
-                      <div className="relative z-10 h-full flex flex-col justify-between">
-                        <div>
-                          <div className="flex items-center gap-4 mb-6">
-                            <img src={profile.avatar} className="w-16 h-16 rounded-2xl border border-white/20 bg-zinc-900" alt="Avatar" />
-                            <div>
-                              <h3 className="text-3xl font-black tracking-tight text-white">{profile.name || claimedName}</h3>
-                              <p className="text-zinc-400 text-sm mt-1 line-clamp-2">{profile.bio}</p>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {selectedSignals.slice(0, 4).map((id) => {
-                              const signal = SIGNALS.find((item) => item.id === id);
-                              if (!signal) {
-                                return null;
-                              }
-                              return (
-                                <div key={id} className="h-12 rounded-xl border border-white/10 bg-black/40 px-4 flex items-center justify-between">
-                                  <span className="text-[10px] font-black tracking-[0.2em] uppercase text-zinc-300">{signal.name}</span>
-                                  <signal.icon className="w-4 h-4 text-zinc-400" />
-                                </div>
-                              );
-                            })}
-                            {selectedSignals.length === 0 && (
-                              <div className="sm:col-span-2 h-12 rounded-xl border border-dashed border-white/15 bg-black/30 px-4 flex items-center justify-center text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                                Add links to see them here
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div className="h-14 rounded-2xl border border-white/10 bg-black/35 px-6 flex items-center justify-between">
-                          <span className="text-xs font-bold text-zinc-300">vibejam.co/{vanitySlug}</span>
-                          <span className="text-[10px] uppercase tracking-[0.24em] text-zinc-500">Live</span>
-                        </div>
-                      </div>
-                    </div>
+                    {renderInteractiveDesktopPreview()}
                   </div>
                   <div className="mt-4 inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.24em] text-zinc-500">
                     <Monitor className="w-4 h-4" /> Desktop view
@@ -466,38 +704,18 @@ const CanvasOnboarding: React.FC<CanvasOnboardingProps> = ({
                 )}
 
                 <div className="mx-auto w-full max-w-sm rounded-[36px] border border-white/10 bg-white/[0.02] p-5">
-                  <div className="aspect-[9/16] bg-black rounded-[44px] border-[10px] border-[#1a1a1a] shadow-[0_35px_90px_rgba(0,0,0,0.95)] relative overflow-hidden flex flex-col items-center pt-16 px-6 text-center">
-                    <img
-                      src={activeTheme?.previewImg}
-                      className="absolute inset-0 w-full h-full object-cover opacity-20 grayscale"
-                      alt={activeTheme?.name ?? 'Theme preview'}
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/15" />
-
-                    <div className="relative z-10 w-full flex flex-col items-center">
-                      <div className="w-20 h-20 rounded-3xl border-2 border-white/20 overflow-hidden mb-5 shadow-2xl">
-                        <img src={profile.avatar} className="w-full h-full object-cover" alt="Avatar" />
-                      </div>
-                      <h3 className="text-2xl font-black text-white tracking-tighter mb-1">{profile.name || claimedName}</h3>
-                      <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-widest mb-6 px-3 leading-relaxed line-clamp-3">
-                        {profile.bio}
-                      </p>
-
-                      <div className="flex gap-3 mb-8">
-                        {selectedSignals.slice(0, 5).map((id) => {
-                          const signal = SIGNALS.find((item) => item.id === id);
-                          return signal ? <signal.icon key={id} className="w-4 h-4 text-white/55" /> : null;
-                        })}
-                      </div>
-
-                      <div className="w-full space-y-2.5">
-                        {[1, 2, 3].map((item) => (
-                          <div key={item} className="w-full h-11 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
-                            <div className="w-1/3 h-1 bg-white/10 rounded-full" />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                  <div
+                    className={`aspect-[9/16] bg-black rounded-[44px] border-[10px] shadow-[0_35px_90px_rgba(0,0,0,0.95)] relative overflow-hidden flex flex-col items-center pt-16 px-6 text-center ${
+                      isEditorialPreview
+                        ? 'border-[#2a2a2a]'
+                        : isBrutalistPreview
+                        ? 'border-[#111]'
+                        : isAuroraPreview
+                        ? 'border-[#24203a]'
+                        : 'border-[#1a1a1a]'
+                    }`}
+                  >
+                    {renderInteractiveMobilePreview()}
 
                     <div className="absolute bottom-8 flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 backdrop-blur-xl">
                       <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" />

@@ -176,6 +176,46 @@ const writeDashboardSessionToStorage = (userId: string, session: CanvasDashboard
   }
 };
 
+const dedupeThemesById = (input: CanvasTheme[]): CanvasTheme[] => {
+  const seen = new Set<string>();
+  const output: CanvasTheme[] = [];
+  for (const theme of input) {
+    if (seen.has(theme.id)) {
+      continue;
+    }
+    seen.add(theme.id);
+    output.push(theme);
+  }
+  return output;
+};
+
+const dedupeTemplatesById = (input: CanvasTemplate[]): CanvasTemplate[] => {
+  const seen = new Set<string>();
+  const output: CanvasTemplate[] = [];
+  for (const item of input) {
+    if (seen.has(item.id)) {
+      continue;
+    }
+    seen.add(item.id);
+    output.push(item);
+  }
+  return output;
+};
+
+const parseTemplateHexColor = (value: string): string => {
+  const match = value.match(/\[#([0-9a-fA-F]{3,8})\]/);
+  if (!match) {
+    return '#111111';
+  }
+  return `#${match[1]}`;
+};
+
+const templatePreviewDataUri = (hex: string): string => {
+  const safeHex = hex.replace('#', '');
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 900'><rect width='600' height='900' fill='%23${safeHex}'/><rect x='58' y='58' width='484' height='784' rx='28' fill='rgba(0,0,0,0.08)'/><rect x='90' y='90' width='420' height='180' rx='18' fill='rgba(255,255,255,0.12)'/><rect x='90' y='300' width='420' height='170' rx='18' fill='rgba(255,255,255,0.09)'/><rect x='90' y='500' width='420' height='280' rx='18' fill='rgba(255,255,255,0.07)'/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
 type CanvasThemePreview = CanvasTheme & {
   previewColor: string;
   icon: string;
@@ -523,9 +563,24 @@ const CollectionTemplatePreview: React.FC<{
 interface CanvasViewProps {
   authUser: User | null;
   onRequireAuth?: () => void;
+  onNavigateMainTab?: (tab: 'Rankings' | 'Marketplace' | 'Canvas') => void;
+  onOpenProfile?: () => void;
+  onToggleNotifications?: () => void;
+  onOpenStartJam?: () => void;
+  unreadCount?: number;
+  isNotificationsOpen?: boolean;
 }
 
-const CanvasView: React.FC<CanvasViewProps> = ({ authUser, onRequireAuth }) => {
+const CanvasView: React.FC<CanvasViewProps> = ({
+  authUser,
+  onRequireAuth,
+  onNavigateMainTab,
+  onOpenProfile,
+  onToggleNotifications,
+  onOpenStartJam,
+  unreadCount = 0,
+  isNotificationsOpen = false,
+}) => {
   const [catalog, setCatalog] = useState<CanvasCatalogResponse | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [isCatalogLoading, setIsCatalogLoading] = useState(true);
@@ -544,6 +599,15 @@ const CanvasView: React.FC<CanvasViewProps> = ({ authUser, onRequireAuth }) => {
   const [needsSlugInput, setNeedsSlugInput] = useState(false);
   const slugInputRef = useRef<HTMLInputElement | null>(null);
   const dashboardSessionRef = useRef<CanvasDashboardSession | null>(null);
+  const authEmail = authUser?.email ?? '';
+  const authAvatarUrl =
+    (authUser?.user_metadata?.avatar_url as string | undefined) ||
+    (authUser?.user_metadata?.picture as string | undefined) ||
+    'https://picsum.photos/id/64/100/100';
+  const authDisplayName =
+    (authUser?.user_metadata?.full_name as string | undefined) ||
+    (authUser?.user_metadata?.name as string | undefined) ||
+    (authEmail ? authEmail.split('@')[0] : 'Guest');
 
   useEffect(() => {
     dashboardSessionRef.current = dashboardSession;
@@ -746,7 +810,22 @@ const CanvasView: React.FC<CanvasViewProps> = ({ authUser, onRequireAuth }) => {
     return [selected, ...themesForDisplay.filter((theme) => theme.id !== selected.id)];
   }, [selectedTheme, themesForDisplay]);
   const landingThemes = useMemo(() => themesForDisplay.slice(0, 5), [themesForDisplay]);
+  const landingThemesUnique = useMemo(() => dedupeThemesById(landingThemes), [landingThemes]);
   const landingTemplates = useMemo(() => templates.slice(0, 6), [templates]);
+  const landingTemplatesUnique = useMemo(() => dedupeTemplatesById(landingTemplates), [landingTemplates]);
+  const studioThemesForDashboard = useMemo(() => {
+    const collectionAsThemes: CanvasTheme[] = landingTemplatesUnique.map((item) => {
+      const hex = parseTemplateHexColor(item.color);
+      return {
+        id: `collection-${item.id}`,
+        name: item.name,
+        desc: `${item.type} • ${item.author}`,
+        accent: 'violet-400',
+        previewImg: templatePreviewDataUri(hex),
+      };
+    });
+    return dedupeThemesById([...landingThemesUnique, ...collectionAsThemes]);
+  }, [landingTemplatesUnique, landingThemesUnique]);
   const activePreviewTheme = useMemo(
     () => themesForDisplay.find((theme) => theme.id === previewTheme) ?? null,
     [previewTheme, themesForDisplay],
@@ -1318,6 +1397,8 @@ const CanvasView: React.FC<CanvasViewProps> = ({ authUser, onRequireAuth }) => {
                 selectedTemplateId={selectedTemplate ?? undefined}
                 isPublishing={isSavingOnboarding}
                 publishError={publishError}
+                onThemeChange={(themeId) => setSelectedTheme(themeId)}
+                onPreviewTheme={(themeId) => setPreviewTheme(themeId)}
                 onClose={() => {
                   setPublishError(null);
                   setIsOnboarding(false);
@@ -1362,6 +1443,15 @@ const CanvasView: React.FC<CanvasViewProps> = ({ authUser, onRequireAuth }) => {
                 onboarding={dashboardSession.onboarding}
                 publish={dashboardSession.publish}
                 themes={themesForDisplay}
+                studioThemes={studioThemesForDashboard}
+                authAvatarUrl={authAvatarUrl}
+                authDisplayName={authDisplayName}
+                unreadCount={unreadCount}
+                isNotificationsOpen={isNotificationsOpen}
+                onNavigateMainTab={onNavigateMainTab}
+                onToggleNotifications={onToggleNotifications}
+                onOpenProfile={onOpenProfile}
+                onOpenStartJam={onOpenStartJam}
                 onClose={handleCloseDashboard}
               />
             )}

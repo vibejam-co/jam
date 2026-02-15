@@ -4,17 +4,18 @@ import { Product } from '../types';
 
 interface Props {
   products: Product[];
+  compact?: boolean;
 }
 
-const ProductCatalog: React.FC<Props> = ({ products }) => {
+const ProductCatalog: React.FC<Props> = ({ products, compact = false }) => {
   return (
-    <div className="py-6">
-      <h3 className="text-xl font-bold mb-6 text-[#332D2B] px-1 font-rounded">Boutique Shelf</h3>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className={compact ? 'py-4' : 'py-6'}>
+      <h3 className={`font-bold mb-5 text-[#332D2B] px-1 font-rounded ${compact ? 'text-lg' : 'text-xl mb-6'}`}>Boutique Shelf</h3>
+      <div className={`grid ${compact ? 'grid-cols-1 gap-3' : 'grid-cols-1 sm:grid-cols-2 gap-4'}`}>
         {products.map((product) => (
           <div 
             key={product.id}
-            className="bg-white p-4 rounded-[20px] border border-[#E5E1D8] soft-shadow group hover:border-[#E07A5F]/30 transition-all flex flex-col h-full"
+            className={`bg-white rounded-[20px] border border-[#E5E1D8] soft-shadow group hover:border-[#E07A5F]/30 transition-all flex flex-col h-full ${compact ? 'p-3' : 'p-4'}`}
           >
             <div className="aspect-square rounded-[14px] overflow-hidden mb-4">
               <img 
@@ -24,10 +25,10 @@ const ProductCatalog: React.FC<Props> = ({ products }) => {
               />
             </div>
             <div className="flex-1 flex flex-col">
-              <div className="flex justify-between items-start mb-1">
-                <h4 className="font-bold text-[#332D2B] font-rounded">{product.title}</h4>
+              <div className="flex justify-between items-start gap-2 mb-1">
+                <h4 className={`font-bold text-[#332D2B] font-rounded leading-snug ${compact ? 'text-sm' : 'text-sm xs:text-base'}`}>{product.title}</h4>
                 {product.price && (
-                  <span className="text-sm font-bold text-[#81B29A]">{product.price}</span>
+                  <span className={`font-bold text-[#81B29A] shrink-0 ${compact ? 'text-xs' : 'text-xs xs:text-sm'}`}>{product.price}</span>
                 )}
               </div>
               <p className="text-sm text-[#332D2B]/60 mb-4 line-clamp-2 leading-snug">

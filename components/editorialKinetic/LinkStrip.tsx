@@ -24,18 +24,22 @@ const LinkStrip: React.FC<LinkStripProps> = ({ item, onHover, isHovered, setIsCu
         onHover(null);
         setIsCursorHovering(false);
       }}
-      className="group relative w-full border-b border-black py-12 md:py-16 px-6 md:px-12 flex items-center justify-between overflow-hidden transition-colors duration-500 ease-in-out"
+      className={`group relative w-full border-b border-black overflow-hidden transition-colors duration-500 ease-in-out ${
+        isMobilePreview
+          ? 'py-7 px-4 flex items-start justify-between'
+          : 'py-12 md:py-16 px-6 md:px-12 flex items-center justify-between'
+      }`}
       style={{ mixBlendMode: 'difference' }}
     >
-      <div className={`flex items-center ${isMobilePreview ? 'gap-6' : 'gap-8 md:gap-16'}`}>
+      <div className={`flex min-w-0 ${isMobilePreview ? 'items-start gap-4 pr-2' : 'items-center gap-8 md:gap-16'}`}>
         <span className={`font-sans-editorial tracking-[0.2em] opacity-80 uppercase ${isMobilePreview ? 'text-xs' : 'text-xs md:text-sm'}`}>
           {item.index}
         </span>
-        <div className="flex flex-col">
-          <h2 className={`font-serif-editorial italic leading-none tracking-tighter ${isMobilePreview ? 'text-5xl' : 'text-5xl md:text-7xl lg:text-8xl'}`}>
+        <div className="flex flex-col min-w-0">
+          <h2 className={`font-serif-editorial italic leading-none tracking-tighter break-words ${isMobilePreview ? 'text-[2.15rem] xs:text-[2.6rem]' : 'text-5xl md:text-7xl lg:text-8xl'}`}>
             {item.title}
           </h2>
-          <span className={`font-sans-editorial mt-2 tracking-[0.15em] opacity-60 uppercase ${isMobilePreview ? 'text-[10px]' : 'text-[10px] md:text-xs'}`}>
+          <span className={`font-sans-editorial mt-2 tracking-[0.15em] opacity-60 uppercase ${isMobilePreview ? 'text-[10px] leading-relaxed pr-1' : 'text-[10px] md:text-xs'}`}>
             {item.subtitle}
           </span>
         </div>
@@ -48,7 +52,7 @@ const LinkStrip: React.FC<LinkStripProps> = ({ item, onHover, isHovered, setIsCu
         }}
         transition={{ duration: 0.3 }}
       >
-        <ArrowUpRight size={isMobilePreview ? 30 : 48} strokeWidth={1} className={isMobilePreview ? 'block' : 'hidden md:block'} />
+        <ArrowUpRight size={isMobilePreview ? 22 : 48} strokeWidth={1} className={isMobilePreview ? 'mt-1 opacity-80' : 'hidden md:block'} />
       </motion.div>
     </motion.a>
   );

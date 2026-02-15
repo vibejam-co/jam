@@ -7,9 +7,14 @@ import { TikTokFrame } from './TikTokFrame';
 import { NewsletterEnvelope } from './NewsletterEnvelope';
 import { Sticker } from './Sticker';
 
-export const Canvas: React.FC = () => {
+interface CanvasProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+export const Canvas: React.FC<CanvasProps> = ({ forcedViewport }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isMobileByWidth, setIsMobileByWidth] = useState(window.innerWidth < 768);
+  const isMobile = forcedViewport ? forcedViewport === 'mobile' : isMobileByWidth;
   
   // Motion values for the canvas position and scale
   const x = useMotionValue(-CANVAS_SIZE / 2 + window.innerWidth / 2);
@@ -25,9 +30,7 @@ export const Canvas: React.FC = () => {
   const orb1Y = useTransform(y, (val) => val * 0.08);
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
+    const handleResize = () => setIsMobileByWidth(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
@@ -53,7 +56,7 @@ export const Canvas: React.FC = () => {
       {/* Background Parallax Layer 2: Decorative Orbs */}
       <motion.div 
         style={{ x: orb1X, y: orb1Y }}
-        className="absolute top-[20%] left-[30%] w-[300px] md:w-96 h-[300px] md:h-96 bg-blue-100 rounded-full blur-[80px] md:blur-[100px] opacity-40 pointer-events-none"
+        className={`absolute top-[20%] left-[30%] bg-blue-100 rounded-full opacity-40 pointer-events-none ${isMobile ? 'w-[260px] h-[260px] blur-[70px]' : 'w-[300px] md:w-96 h-[300px] md:h-96 blur-[80px] md:blur-[100px]'}`}
       />
 
       {/* Main Draggable Canvas Container */}
@@ -131,7 +134,7 @@ export const Canvas: React.FC = () => {
       </motion.div>
 
       {/* Responsive HUD Navigation (Mobile Left) */}
-      <div className="fixed left-4 bottom-24 md:bottom-auto md:top-1/2 md:-translate-y-1/2 flex flex-col gap-2 z-50">
+      <div className={`fixed left-4 flex flex-col gap-2 z-50 ${isMobile ? 'bottom-24' : 'bottom-24 md:bottom-auto md:top-1/2 md:-translate-y-1/2'}`}>
         <button 
           onClick={zoomIn}
           className="w-10 h-10 bg-white shadow-lg border border-gray-100 rounded-full flex items-center justify-center font-bold text-lg hover:bg-gray-50 active:scale-90 transition-all"
@@ -153,29 +156,29 @@ export const Canvas: React.FC = () => {
       </div>
 
       {/* Persistent UI Overlay - Bottom Dock */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] md:w-auto flex items-center justify-between md:justify-start gap-4 bg-white/90 backdrop-blur-xl px-4 md:px-6 py-2.5 md:py-3 rounded-full shadow-2xl border border-white/40 z-50">
-         <div className="flex items-center gap-2 md:gap-3 md:border-r md:pr-4 border-gray-200">
+      <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center justify-between gap-4 bg-white/90 backdrop-blur-xl rounded-full shadow-2xl border border-white/40 z-50 ${isMobile ? 'w-[92%] px-4 py-2.5' : 'w-[90%] md:w-auto px-4 md:px-6 py-2.5 md:py-3 md:justify-start'}`}>
+         <div className={`flex items-center gap-2 border-gray-200 ${isMobile ? '' : 'md:gap-3 md:border-r md:pr-4'}`}>
             <div className="w-8 h-8 rounded-full bg-black text-white flex items-center justify-center font-bold text-[10px] md:text-xs italic shrink-0">AV</div>
-            <div className="flex flex-col md:flex-row md:items-center md:gap-2 overflow-hidden">
-                <span className="font-bold text-[11px] md:text-sm text-gray-800 whitespace-nowrap">Alex's Desk</span>
-                <span className="text-[9px] md:text-xs text-green-500 font-bold flex items-center gap-1">
+            <div className={`flex overflow-hidden ${isMobile ? 'flex-col' : 'flex-col md:flex-row md:items-center md:gap-2'}`}>
+                <span className={`font-bold text-gray-800 whitespace-nowrap ${isMobile ? 'text-[11px]' : 'text-[11px] md:text-sm'}`}>Alex's Desk</span>
+                <span className={`text-green-500 font-bold flex items-center gap-1 ${isMobile ? 'text-[9px]' : 'text-[9px] md:text-xs'}`}>
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
                     Live
                 </span>
             </div>
          </div>
-         <span className="hidden lg:block text-xs text-gray-400 font-medium tracking-tight">
+         <span className={`text-xs text-gray-400 font-medium tracking-tight ${isMobile ? 'hidden' : 'hidden lg:block'}`}>
             Use mouse or touch to pan the spatial world
          </span>
          
          {/* Join Button for Mobile within the dock if space is tight, otherwise separate */}
-         <button className="md:hidden bg-black text-white font-black text-[10px] px-4 py-1.5 rounded-full uppercase tracking-widest active:scale-95 transition-transform">
+         <button className={`${isMobile ? 'block' : 'md:hidden'} bg-black text-white font-black text-[10px] px-4 py-1.5 rounded-full uppercase tracking-widest active:scale-95 transition-transform`}>
             Join
          </button>
       </div>
 
       {/* Desktop Top-Right Action */}
-      <div className="hidden md:block fixed top-8 right-8 z-50">
+      <div className={`${isMobile ? 'hidden' : 'hidden md:block'} fixed top-8 right-8 z-50`}>
         <button className="bg-black text-white font-black text-xs px-5 py-2 rounded-full uppercase tracking-widest shadow-lg hover:scale-105 transition-transform active:scale-95">
           Join VibeJam
         </button>

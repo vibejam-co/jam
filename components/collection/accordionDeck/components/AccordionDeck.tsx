@@ -4,18 +4,23 @@ import { motion } from 'framer-motion';
 import { SLICES } from '../constants';
 import KineticSlice from './KineticSlice';
 
-const AccordionDeck: React.FC = () => {
+interface AccordionDeckProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+const AccordionDeck: React.FC<AccordionDeckProps> = ({ forcedViewport }) => {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(0);
+  const isCompact = forcedViewport === 'mobile';
 
   return (
-    <div className="relative w-full h-screen bg-black flex flex-col md:flex-row overflow-hidden">
+    <div className={`relative w-full bg-black flex overflow-hidden ${isCompact ? 'h-full min-h-[100dvh] flex-col' : 'h-screen flex-col md:flex-row'}`}>
       {/* Branding Overlay (Static) */}
-      <div className="absolute top-8 md:top-12 left-8 md:left-12 z-20 mix-blend-difference pointer-events-none">
-        <h1 className="font-oswald text-2xl md:text-3xl font-bold tracking-[0.3em]">VIBEJAM</h1>
-        <p className="font-bodoni italic text-sm md:text-base opacity-70">Kinetic Slicer // SS25</p>
+      <div className={`absolute z-20 mix-blend-difference pointer-events-none ${isCompact ? 'top-4 left-4' : 'top-8 md:top-12 left-8 md:left-12'}`}>
+        <h1 className={`font-oswald font-bold tracking-[0.3em] ${isCompact ? 'text-lg' : 'text-2xl md:text-3xl'}`}>VIBEJAM</h1>
+        <p className={`font-bodoni italic opacity-70 ${isCompact ? 'text-xs' : 'text-sm md:text-base'}`}>Kinetic Slicer // SS25</p>
       </div>
 
-      <div className="absolute bottom-8 md:bottom-12 right-8 md:right-12 z-20 mix-blend-difference pointer-events-none text-right hidden md:block">
+      <div className={`absolute bottom-8 md:bottom-12 right-8 md:right-12 z-20 mix-blend-difference pointer-events-none text-right ${isCompact ? 'hidden' : 'hidden md:block'}`}>
         <p className="font-oswald text-[10px] tracking-[0.5em] opacity-50 uppercase leading-loose">
           BRUTAL LUXE INTERFACE<br />
           AUTUMN WINTER COLLECTIONS<br />
@@ -25,7 +30,7 @@ const AccordionDeck: React.FC = () => {
 
       {/* Slices Container */}
       <motion.div 
-        className="flex flex-col md:flex-row w-full h-full"
+        className={`w-full h-full ${isCompact ? 'flex flex-col pt-20' : 'flex flex-col md:flex-row'}`}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 1.2 }}
@@ -41,6 +46,7 @@ const AccordionDeck: React.FC = () => {
                 // or you can set to null to go back to even distribution
                 // For "luxury" feel, keeping the last one or default to 0 is common.
             }}
+            compact={isCompact}
           />
         ))}
       </motion.div>

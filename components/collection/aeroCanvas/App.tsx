@@ -2,10 +2,14 @@
 import React from 'react';
 import { Canvas } from './components/Canvas';
 
-const App: React.FC = () => {
+interface AeroCanvasAppProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+const App: React.FC<AeroCanvasAppProps> = ({ forcedViewport }) => {
   return (
     <div className="w-full h-full overflow-hidden">
-      <Canvas />
+      <Canvas forcedViewport={forcedViewport} />
     </div>
   );
 };

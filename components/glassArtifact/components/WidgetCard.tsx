@@ -8,8 +8,11 @@ import { MapWidget } from './widgets/MapWidget';
 import { VideoWidget } from './widgets/VideoWidget';
 import { Cloud, Edit3 } from 'lucide-react';
 
-export const WidgetCard: React.FC<WidgetCardProps> = ({ widget, isActive, onActivate }) => {
-  const getSpanClasses = (size: string) => {
+export const WidgetCard: React.FC<WidgetCardProps> = ({ widget, isActive, onActivate, compact = false }) => {
+  const getSpanClasses = (size: string, compact: boolean) => {
+    if (compact) {
+      return 'col-span-1 row-span-1';
+    }
     switch (size) {
       case '2x2': return 'col-span-1 sm:col-span-2 row-span-2';
       case '2x1': return 'col-span-1 sm:col-span-2 row-span-1';
@@ -36,7 +39,7 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({ widget, isActive, onActi
       className={`
         relative group cursor-pointer aerogel rounded-[32px] overflow-hidden 
         transition-shadow duration-500
-        ${getSpanClasses(widget.size)} 
+        ${getSpanClasses(widget.size, compact)} 
         ${getShadowColor(widget.type)}
         ${isActive ? 'opacity-0' : 'opacity-100'}
       `}

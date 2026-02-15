@@ -13,4 +13,5 @@ export interface WidgetCardProps {
   widget: Widget;
   isActive: boolean;
   onActivate: (id: string | null) => void;
+  compact?: boolean;
 }

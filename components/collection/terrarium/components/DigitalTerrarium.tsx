@@ -10,12 +10,16 @@ import MusicBird from './MusicBird';
 import Mailbox from './Mailbox';
 import BeanstalkMobile from './BeanstalkMobile';
 
-const DigitalTerrarium: React.FC = () => {
+interface DigitalTerrariumProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+const DigitalTerrarium: React.FC<DigitalTerrariumProps> = ({ forcedViewport }) => {
   const [wind, setWind] = useState<WindState>({ x: 0, y: 0 });
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobileByWidth, setIsMobileByWidth] = useState(false);
   
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    const handleResize = () => setIsMobileByWidth(window.innerWidth < 768);
     const handleMouseMove = (e: MouseEvent) => {
       // Calculate wind influence: plants lean away from cursor
       const x = (e.clientX / window.innerWidth - 0.5) * 15;
@@ -32,6 +36,8 @@ const DigitalTerrarium: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
     };
   }, []);
+
+  const isMobile = forcedViewport ? forcedViewport === 'mobile' : isMobileByWidth;
 
   return (
     <div className="relative w-full h-screen overflow-hidden bg-gradient-to-b from-[#FFEFBA] to-white">

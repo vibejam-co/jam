@@ -2,10 +2,14 @@
 import React from 'react';
 import DigitalTerrarium from './components/DigitalTerrarium';
 
-const App: React.FC = () => {
+interface TerrariumAppProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+const App: React.FC<TerrariumAppProps> = ({ forcedViewport }) => {
   return (
     <div className="w-full h-screen overflow-hidden">
-      <DigitalTerrarium />
+      <DigitalTerrarium forcedViewport={forcedViewport} />
     </div>
   );
 };

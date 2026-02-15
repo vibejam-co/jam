@@ -3,7 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { INITIAL_CREATOR } from '../constants';
 import { SignalCard } from './SignalCard';
 
-export const JamPage: React.FC = () => {
+interface JamPageProps {
+  compact?: boolean;
+}
+
+export const JamPage: React.FC<JamPageProps> = ({ compact = false }) => {
   const [data] = useState(INITIAL_CREATOR);
   const [refinedNarrative, setRefinedNarrative] = useState(data.narrative);
   const [isRefining, setIsRefining] = useState(false);
@@ -20,12 +24,12 @@ export const JamPage: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-6 pt-32 pb-48 animate-in fade-in duration-1000">
+    <div className={`max-w-6xl mx-auto px-4 md:px-6 animate-in fade-in duration-1000 ${compact ? 'pt-24 pb-20' : 'pt-32 pb-48'}`}>
       {/* Identity Section */}
-      <section className="grid grid-cols-1 md:grid-cols-12 gap-12 mb-32">
-        <div className="md:col-span-8">
+      <section className={`grid ${compact ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-12'} gap-12 ${compact ? 'mb-16' : 'mb-32'}`}>
+        <div className={compact ? '' : 'md:col-span-8'}>
           <h2 className="font-mono text-[10px] uppercase tracking-[0.4em] text-neutral-500 mb-6">Identity</h2>
-          <h1 className="text-7xl md:text-9xl font-serif italic tracking-tighter leading-none mb-8">
+          <h1 className={`${compact ? 'text-5xl' : 'text-7xl md:text-9xl'} font-serif italic tracking-tighter leading-none mb-8`}>
             {data.name}
           </h1>
           <p className="font-mono text-xs tracking-widest uppercase text-neutral-400">
@@ -35,15 +39,15 @@ export const JamPage: React.FC = () => {
       </section>
 
       {/* Hero Visual */}
-      <section className="mb-48 relative">
-        <div className="aspect-[16/9] md:aspect-[21/9] overflow-hidden bg-neutral-900 group">
+      <section className={`relative ${compact ? 'mb-20' : 'mb-48'}`}>
+        <div className={`overflow-hidden bg-neutral-900 group ${compact ? 'aspect-[4/3]' : 'aspect-[16/9] md:aspect-[21/9]'}`}>
           <img 
             src={data.heroImage} 
             alt="Hero Visual" 
             className="w-full h-full object-cover grayscale opacity-90 transition-transform duration-1000 group-hover:scale-105 group-hover:grayscale-0"
           />
         </div>
-        <div className="absolute -bottom-12 -right-6 md:right-12 bg-[#0A0A0A] p-8 max-w-sm border border-neutral-800 shadow-2xl">
+        <div className={`bg-[#0A0A0A] p-6 md:p-8 max-w-sm border border-neutral-800 shadow-2xl ${compact ? 'mt-4 relative' : 'absolute -bottom-12 -right-6 md:right-12'}`}>
           <p className="font-mono text-[10px] uppercase tracking-widest text-neutral-500 mb-4">Current Focus</p>
           <p className="text-lg leading-relaxed font-serif italic">
             "Redefining silence through architectural digital design."
@@ -52,9 +56,9 @@ export const JamPage: React.FC = () => {
       </section>
 
       {/* Narrative & Proof Grid */}
-      <section className="grid grid-cols-1 md:grid-cols-12 gap-24 items-start">
+      <section className={`grid ${compact ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-12'} items-start ${compact ? 'gap-12' : 'gap-24'}`}>
         {/* Narrative */}
-        <div className="md:col-span-7">
+        <div className={compact ? '' : 'md:col-span-7'}>
           <div className="flex justify-between items-baseline mb-8">
             <h2 className="font-mono text-[10px] uppercase tracking-[0.4em] text-neutral-500">Narrative</h2>
             <button 
@@ -65,14 +69,14 @@ export const JamPage: React.FC = () => {
               {isRefining ? 'Curating...' : 'Curate via Gemini'}
             </button>
           </div>
-          <div className="text-3xl md:text-4xl leading-[1.3] font-light text-neutral-200">
+          <div className={`${compact ? 'text-2xl' : 'text-3xl md:text-4xl'} leading-[1.3] font-light text-neutral-200`}>
             {refinedNarrative}
           </div>
           <div className="mt-12 h-px w-24 bg-neutral-800"></div>
         </div>
 
         {/* Proof / Signals */}
-        <div className="md:col-span-5 space-y-8">
+        <div className={`${compact ? '' : 'md:col-span-5'} space-y-8`}>
           <h2 className="font-mono text-[10px] uppercase tracking-[0.4em] text-neutral-500 mb-10">Signals</h2>
           <div className="grid grid-cols-1 gap-1">
             {data.signals.map((signal, idx) => (
@@ -92,7 +96,7 @@ export const JamPage: React.FC = () => {
       </section>
 
       {/* Silence Section */}
-      <section className="py-64 text-center">
+      <section className={`${compact ? 'py-24' : 'py-64'} text-center`}>
         <div className="inline-block relative">
           <div className="w-1 h-1 bg-neutral-500 rounded-full mx-auto mb-8 opacity-40"></div>
           <p className="font-mono text-[9px] uppercase tracking-[1em] text-neutral-600">This space is intentional</p>

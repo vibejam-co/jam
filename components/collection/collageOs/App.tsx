@@ -6,19 +6,24 @@ import { CRTVideo } from './components/CRTVideo';
 import { PolaroidStack } from './components/PolaroidStack';
 import { RippedCard } from './components/RippedCard';
 
-const App: React.FC = () => {
+interface CollageOsAppProps {
+  forcedViewport?: 'mobile' | 'desktop';
+}
+
+const App: React.FC<CollageOsAppProps> = ({ forcedViewport }) => {
+  const isCompact = forcedViewport === 'mobile';
   return (
-    <div className="min-h-screen w-full corkboard p-4 md:p-12 relative overflow-hidden flex flex-col items-center">
+    <div className={`min-h-screen w-full corkboard relative overflow-hidden flex flex-col items-center ${isCompact ? 'p-3' : 'p-4 md:p-12'}`}>
       {/* Header Sticker */}
       <motion.div 
         drag
         whileDrag={{ scale: 1.05, rotate: 2, zIndex: 50 }}
         initial={{ y: -100, rotate: -5 }}
         animate={{ y: 0 }}
-        className="z-10 cursor-grab active:cursor-grabbing mb-8"
+        className={`z-10 cursor-grab active:cursor-grabbing ${isCompact ? 'mb-4' : 'mb-8'}`}
       >
         <RippedCard color="bg-yellow-300" className="px-8 py-4 shadow-xl">
-          <h1 className="font-marker text-4xl md:text-6xl text-black tracking-tighter">
+          <h1 className={`font-marker text-black tracking-tighter ${isCompact ? 'text-2xl' : 'text-4xl md:text-6xl'}`}>
             VIBEJAM COLLAGE OS
           </h1>
           <p className="font-typewriter text-xs text-center uppercase tracking-widest mt-1">
@@ -28,20 +33,20 @@ const App: React.FC = () => {
       </motion.div>
 
       {/* Main Collage Area */}
-      <div className="relative w-full max-w-6xl h-[80vh] md:h-[70vh]">
+      <div className={`relative w-full max-w-6xl ${isCompact ? 'min-h-[72vh] flex flex-col gap-4 px-1' : 'h-[80vh] md:h-[70vh]'}`}>
         
         {/* Cassette Player */}
-        <div className="absolute top-0 left-0 md:left-10 z-20">
+        <div className={isCompact ? 'relative z-20 self-start scale-[0.82] origin-top-left' : 'absolute top-0 left-0 md:left-10 z-20'}>
           <CassettePlayer title="LO-FI BEATS TO ROT YOUR BRAIN TO" />
         </div>
 
         {/* CRT Video */}
-        <div className="absolute bottom-10 right-0 md:right-10 z-10">
+        <div className={isCompact ? 'relative z-10 self-end scale-[0.82] origin-top-right -mt-8' : 'absolute bottom-10 right-0 md:right-10 z-10'}>
           <CRTVideo />
         </div>
 
         {/* Polaroid Stack */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 md:translate-x-0 md:translate-y-0 md:left-20 md:bottom-20 z-30">
+        <div className={isCompact ? 'relative z-30 self-center scale-[0.86] -mt-6' : 'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 md:translate-x-0 md:translate-y-0 md:left-20 md:bottom-20 z-30'}>
           <PolaroidStack />
         </div>
 
@@ -69,14 +74,14 @@ const App: React.FC = () => {
         </motion.div>
 
         {/* Washi Tape Decorations on the "Screen" */}
-        <div className="pointer-events-none absolute inset-0">
+        <div className={`pointer-events-none absolute inset-0 ${isCompact ? 'hidden' : ''}`}>
           <WashiTape color="bg-green-400/30" rotation={45} top="10%" left="5%" />
           <WashiTape color="bg-purple-400/30" rotation={-30} bottom="15%" right="10%" />
         </div>
       </div>
 
       {/* Footer Instruction */}
-      <div className="fixed bottom-4 right-4 bg-white/80 p-2 font-typewriter text-[10px] border border-black z-50">
+      <div className={`bg-white/80 p-2 font-typewriter text-[10px] border border-black z-50 ${isCompact ? 'mt-2 self-end' : 'fixed bottom-4 right-4'}`}>
         DRAG ANYTHING TO REARRANGE YOUR VIBE.
       </div>
     </div>
