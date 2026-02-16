@@ -17,6 +17,7 @@ import NotificationCenter from './components/NotificationCenter';
 import NewsletterSection from './components/NewsletterSection';
 import Footer from './components/Footer';
 import LegalModal from './components/LegalModal';
+import CanvasPublicPage from './components/CanvasPublicPage';
 import { fetchApps, fetchNotifications, publishApp } from './lib/api';
 import { supabase } from './lib/supabase-client';
 import type { User } from '@supabase/supabase-js';
@@ -35,7 +36,26 @@ const ALL_CATEGORIES = [
   "Travel", "Utilities"
 ];
 
+const RESERVED_PUBLIC_PATHS = new Set(['', 'rankings', 'marketplace', 'canvas']);
+
+const getPublicSlugFromPath = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = window.location.pathname || '/';
+  const cleaned = raw.replace(/^\/+|\/+$/g, '').toLowerCase();
+  if (!cleaned || cleaned.includes('/') || RESERVED_PUBLIC_PATHS.has(cleaned) || cleaned.startsWith('api')) {
+    return null;
+  }
+  if (!/^[a-z0-9-]+$/.test(cleaned)) {
+    return null;
+  }
+  return cleaned;
+};
+
 const App: React.FC = () => {
+  const [publicSlug] = useState<string | null>(() => getPublicSlugFromPath());
   const [activeTab, setActiveTab] = useState<'Rankings' | 'Marketplace' | 'Canvas'>('Rankings');
   const [filter, setFilter] = useState<string>('All');
   const [isCategoryMenuOpen, setIsCategoryMenuOpen] = useState(false);
@@ -209,6 +229,10 @@ const App: React.FC = () => {
     setIsSigningOut(false);
     setIsProfileOpen(false);
   };
+
+  if (publicSlug) {
+    return <CanvasPublicPage slug={publicSlug} />;
+  }
 
   return (
     <div className="min-h-screen bg-black text-white selection:bg-white/20">

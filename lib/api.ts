@@ -1,5 +1,6 @@
 import type {
   CanvasCatalogResponse,
+  CanvasPublicSessionResponse,
   CanvasSessionResponse,
   CanvasOnboardingPayload,
   CanvasPublishResult,
@@ -80,3 +81,6 @@ export const fetchCanvasCatalog = () => request<CanvasCatalogResponse>('/api/can
 
 export const fetchMyCanvasSession = () =>
   request<CanvasSessionResponse>('/api/canvas?mode=session');
+
+export const fetchPublicCanvasSession = (slug: string) =>
+  request<CanvasPublicSessionResponse>(`/api/canvas?mode=public&slug=${encodeURIComponent(slug)}`);

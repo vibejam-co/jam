@@ -11,9 +11,18 @@ interface AccordionDeckProps {
 const AccordionDeck: React.FC<AccordionDeckProps> = ({ forcedViewport }) => {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(0);
   const isCompact = forcedViewport === 'mobile';
+  const isEmbeddedViewport = forcedViewport === 'mobile' || forcedViewport === 'desktop';
 
   return (
-    <div className={`relative w-full bg-black flex overflow-hidden ${isCompact ? 'h-full min-h-[100dvh] flex-col' : 'h-screen flex-col md:flex-row'}`}>
+    <div
+      className={`relative w-full bg-black flex overflow-hidden ${
+        isCompact
+          ? 'h-full min-h-0 flex-col'
+          : isEmbeddedViewport
+            ? 'h-full min-h-0 flex-row'
+            : 'h-screen flex-col md:flex-row'
+      }`}
+    >
       {/* Branding Overlay (Static) */}
       <div className={`absolute z-20 mix-blend-difference pointer-events-none ${isCompact ? 'top-4 left-4' : 'top-8 md:top-12 left-8 md:left-12'}`}>
         <h1 className={`font-oswald font-bold tracking-[0.3em] ${isCompact ? 'text-lg' : 'text-2xl md:text-3xl'}`}>VIBEJAM</h1>
@@ -30,7 +39,7 @@ const AccordionDeck: React.FC<AccordionDeckProps> = ({ forcedViewport }) => {
 
       {/* Slices Container */}
       <motion.div 
-        className={`w-full h-full ${isCompact ? 'flex flex-col pt-20' : 'flex flex-col md:flex-row'}`}
+        className={`w-full h-full ${isCompact ? 'flex flex-col pt-16' : isEmbeddedViewport ? 'flex flex-row' : 'flex flex-col md:flex-row'}`}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 1.2 }}

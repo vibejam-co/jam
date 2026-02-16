@@ -128,3 +128,7 @@ export interface CanvasSessionResponse {
   session: CanvasDashboardSession | null;
   profiles: CanvasOwnedProfile[];
 }
+
+export interface CanvasPublicSessionResponse {
+  session: CanvasDashboardSession | null;
+}

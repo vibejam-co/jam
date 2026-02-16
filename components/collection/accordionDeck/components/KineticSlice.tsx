@@ -20,8 +20,9 @@ const KineticSlice: React.FC<KineticSliceProps> = ({ data, isExpanded, onHover, 
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
       onClick={onHover} // Better for touch devices
+      onFocus={onHover}
       className={`relative h-full overflow-hidden border-white/20 transition-colors duration-500 cursor-pointer group
-        ${isExpanded ? 'flex-[5] z-10' : 'flex-1'}
+        ${compact ? (isExpanded ? 'flex-[2.4] z-10' : 'flex-1') : (isExpanded ? 'flex-[5] z-10' : 'flex-1')}
         ${compact ? 'border-b last:border-0 min-h-[120px]' : 'border-b md:border-b-0 md:border-r last:border-0'}
       `}
       transition={SPRING_TRANSITION}
@@ -45,10 +46,10 @@ const KineticSlice: React.FC<KineticSliceProps> = ({ data, isExpanded, onHover, 
         ${isExpanded ? 'opacity-0 scale-110 blur-xl' : 'opacity-100 scale-100'}
       `}>
         <div className={`flex items-center justify-center ${compact ? 'flex-row gap-3' : 'flex-col md:flex-row'}`}>
-            <span className={`font-oswald text-xs tracking-[1em] opacity-50 ${compact ? '' : 'mb-4 md:mb-0 md:mr-8 [writing-mode:vertical-rl] rotate-180'}`}>
+            <span className={`font-oswald text-[10px] tracking-[0.8em] opacity-50 ${compact ? '' : 'mb-4 md:mb-0 md:mr-8 [writing-mode:vertical-rl] rotate-180'}`}>
                 {data.id}
             </span>
-            <h3 className={`font-oswald font-bold tracking-tighter text-white whitespace-nowrap uppercase ${compact ? 'text-2xl [writing-mode:horizontal-tb]' : 'text-4xl md:text-7xl [writing-mode:horizontal-tb] md:[writing-mode:vertical-rl] md:rotate-180'}`}>
+            <h3 className={`font-oswald font-bold tracking-tighter text-white whitespace-nowrap uppercase ${compact ? 'text-xl [writing-mode:horizontal-tb]' : 'text-4xl md:text-7xl [writing-mode:horizontal-tb] md:[writing-mode:vertical-rl] md:rotate-180'}`}>
                 {data.title}
             </h3>
         </div>
@@ -57,13 +58,14 @@ const KineticSlice: React.FC<KineticSliceProps> = ({ data, isExpanded, onHover, 
       {/* Expanded Content */}
       <AnimatePresence>
         {isExpanded && (
-          <SliceContent type={data.type} subtitle={data.subtitle} />
+          <SliceContent type={data.type} subtitle={data.subtitle} compact={compact} />
         )}
       </AnimatePresence>
 
       {/* Decorative ID Corner */}
       <div className={`absolute top-6 left-6 font-oswald text-[10px] tracking-[0.4em] opacity-40 transition-opacity duration-500
         ${isExpanded ? 'opacity-0' : 'opacity-40'}
+        ${compact ? 'hidden' : ''}
       `}>
         SYSTEM_ENTRY // {data.id}
       </div>

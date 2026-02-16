@@ -64,6 +64,7 @@ import KineticVariableApp from './kineticVariable/App';
 import OrbitalLensApp from './orbitalLens/App';
 import VaporOsApp from './vaporOs/App';
 import type { CanvasOnboardingPayload, CanvasPublishResult, CanvasTheme } from '../types';
+import { saveCanvasOnboarding } from '../lib/api';
 
 type DashboardTab = 'canvas' | 'themes' | 'monetize' | 'audience' | 'analytics';
 type PreviewMode = 'mobile' | 'desktop';
@@ -88,6 +89,28 @@ type ThemeOverrides = {
   fontFamily: 'Inter' | 'JetBrains Mono';
   cornerRadius: number;
   bouncyMode: boolean;
+};
+
+type MonetizeStatus = 'completed' | 'pending' | 'failed';
+
+type MonetizeTransaction = {
+  id: string;
+  user: string;
+  amount: string;
+  type: string;
+  status: MonetizeStatus;
+  date: string;
+};
+
+type MonetizeStream = {
+  id: 1 | 2 | 3 | 4;
+  title: string;
+  desc: string;
+  icon: typeof ShoppingBag;
+  color: string;
+  action: string;
+  badge?: string;
+  toggle?: boolean;
 };
 
 interface CanvasCommandDashboardProps {
@@ -134,6 +157,19 @@ const RECENT_TRANSACTIONS = [
   { id: '4', user: 'Elena Wu', amount: '$12.50', type: 'Affiliate', status: 'completed', date: '5 hours ago' },
   { id: '5', user: 'Jordan Lee', amount: '$49.00', type: 'Digital Drop', status: 'failed', date: 'Yesterday' },
 ] as const;
+
+const INITIAL_MONETIZE_STREAMS: MonetizeStream[] = [
+  { id: 1, title: 'Digital Drops', desc: 'Sell files, presets, or code.', icon: ShoppingBag, color: 'bg-blue-500/10 text-blue-500', action: 'Add Product' },
+  { id: 2, title: 'The Tip Jar', desc: 'Accept support from fans.', icon: Heart, color: 'bg-rose-500/10 text-rose-500', action: 'Configure', toggle: true, badge: 'ON' },
+  { id: 3, title: 'Brand Collabs', desc: 'Get inbound sponsorship offers.', icon: Target, color: 'bg-emerald-500/10 text-emerald-500', action: 'View Deals', badge: '2 New' },
+  { id: 4, title: 'Affiliate Hub', desc: 'Recommend tools and earn.', icon: TrendingUp, color: 'bg-amber-500/10 text-amber-500', action: 'Marketplace' },
+];
+
+const INITIAL_MONETIZE_REVENUE = 12400;
+
+const formatUsd = (value: number): string => {
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
 
 const SUBSCRIBERS = [
   { id: '1', name: 'James Wilson', email: 'james.w@example.com', source: 'Tip Jar', ltv: '$145.00', avatar: 'https://i.pravatar.cc/150?u=1' },
@@ -269,6 +305,17 @@ const inferLinkKeyFromTitle = (title: string): string | null => {
   return null;
 };
 
+const sanitizeLiveSlug = (input: string): string =>
+  input
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\/(www\.)?vibejam\.co\//, '')
+    .replace(/^vibejam\.co\//, '')
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48);
+
 const getInitialLinks = (onboarding: CanvasOnboardingPayload, publish: CanvasPublishResult): DashboardLink[] => {
   const orderedSignalIds = onboarding.selectedSignals.length > 0 ? onboarding.selectedSignals : Object.keys(onboarding.links);
 
@@ -323,6 +370,7 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isDesktopPreviewOpen, setIsDesktopPreviewOpen] = useState(false);
+  const [isOpeningLivePage, setIsOpeningLivePage] = useState(false);
 
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingLink, setEditingLink] = useState<DashboardLink | null>(null);
@@ -336,6 +384,14 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
     cornerRadius: 16,
     bouncyMode: true,
   });
+  const [monetizeStreams, setMonetizeStreams] = useState<MonetizeStream[]>(INITIAL_MONETIZE_STREAMS);
+  const [monetizeTransactions, setMonetizeTransactions] = useState<MonetizeTransaction[]>(
+    RECENT_TRANSACTIONS.map((entry) => ({ ...entry })),
+  );
+  const [monetizeRevenue, setMonetizeRevenue] = useState(INITIAL_MONETIZE_REVENUE);
+  const [isTipJarEnabled, setIsTipJarEnabled] = useState(true);
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [monetizeNotice, setMonetizeNotice] = useState<string | null>(null);
   const resolvedAccentColor = resolveAccentColor(overrides.accentColor);
   const accentRingSoft = hexToRgba(resolvedAccentColor, 0.32);
   const accentRingStrong = hexToRgba(resolvedAccentColor, 0.55);
@@ -405,6 +461,102 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
 
   const updateOverride = <K extends keyof ThemeOverrides>(key: K, value: ThemeOverrides[K]) => {
     setOverrides((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const pushDemoTransaction = (entry: Omit<MonetizeTransaction, 'id'>) => {
+    const next: MonetizeTransaction = {
+      ...entry,
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
+    };
+    setMonetizeTransactions((prev) => [next, ...prev].slice(0, 8));
+  };
+
+  const setStreamBadge = (streamId: MonetizeStream['id'], badge?: string) => {
+    setMonetizeStreams((prev) =>
+      prev.map((stream) => (stream.id === streamId ? { ...stream, badge } : stream)),
+    );
+  };
+
+  const handleToggleTipJar = () => {
+    setIsTipJarEnabled((prev) => {
+      const next = !prev;
+      setStreamBadge(2, next ? 'ON' : 'OFF');
+      setMonetizeNotice(next ? 'Tip Jar activated for fans.' : 'Tip Jar paused.');
+      return next;
+    });
+  };
+
+  const handleMonetizeStreamAction = (streamId: MonetizeStream['id']) => {
+    if (streamId === 1) {
+      pushDemoTransaction({
+        user: 'New Buyer',
+        amount: '$49.00',
+        type: 'Digital Drop',
+        status: 'completed',
+        date: 'Just now',
+      });
+      setMonetizeRevenue((prev) => prev + 49);
+      setStreamBadge(1, '1 Added');
+      setMonetizeNotice('Demo product added to Digital Drops.');
+      return;
+    }
+
+    if (streamId === 2) {
+      handleToggleTipJar();
+      return;
+    }
+
+    if (streamId === 3) {
+      pushDemoTransaction({
+        user: 'Brand Partner',
+        amount: '$299.00',
+        type: 'Brand Collab',
+        status: 'pending',
+        date: 'Just now',
+      });
+      setMonetizeNotice('Opened collab pipeline. New inbound deal added.');
+      setStreamBadge(3, '1 New');
+      return;
+    }
+
+    pushDemoTransaction({
+      user: 'Affiliate Network',
+      amount: '$12.50',
+      type: 'Affiliate',
+      status: 'completed',
+      date: 'Just now',
+    });
+    setMonetizeRevenue((prev) => prev + 12.5);
+    setMonetizeNotice('Affiliate marketplace synced with demo payout.');
+  };
+
+  const handleWithdrawFunds = () => {
+    if (isWithdrawing) {
+      return;
+    }
+
+    setIsWithdrawing(true);
+    setMonetizeNotice('Processing payout transfer...');
+
+    const pendingId = `${Date.now()}-withdraw`;
+    const pendingEntry: MonetizeTransaction = {
+      id: pendingId,
+      user: 'VibeJam Payout',
+      amount: '$2,000.00',
+      type: 'Withdrawal',
+      status: 'pending',
+      date: 'Just now',
+    };
+    setMonetizeTransactions((prev) => [pendingEntry, ...prev].slice(0, 8));
+
+    window.setTimeout(() => {
+      setMonetizeTransactions((prev) =>
+        prev.map((item) => (item.id === pendingId ? { ...item, status: 'completed', date: 'A few seconds ago' } : item)),
+      );
+      setMonetizeRevenue((prev) => Math.max(0, prev - 2000));
+      setIsWithdrawing(false);
+      setMonetizeNotice('Payout completed successfully.');
+    }, 1000);
   };
 
   const openAddModal = () => {
@@ -684,12 +836,10 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
   );
 
   const renderMonetizeView = () => {
-    const streams = [
-      { id: 1, title: 'Digital Drops', desc: 'Sell files, presets, or code.', icon: ShoppingBag, color: 'bg-blue-500/10 text-blue-500', action: 'Add Product' },
-      { id: 2, title: 'The Tip Jar', desc: 'Accept support from fans.', icon: Heart, color: 'bg-rose-500/10 text-rose-500', action: 'Configure', toggle: true, badge: 'ON' },
-      { id: 3, title: 'Brand Collabs', desc: 'Get inbound sponsorship offers.', icon: Target, color: 'bg-emerald-500/10 text-emerald-500', action: 'View Deals', badge: '2 New' },
-      { id: 4, title: 'Affiliate Hub', desc: 'Recommend tools and earn.', icon: TrendingUp, color: 'bg-amber-500/10 text-amber-500', action: 'Marketplace' },
-    ];
+    const revenueLabel = formatUsd(monetizeRevenue);
+    const [revenueWhole, revenueCents = '00'] = revenueLabel.split('.');
+    const growthValue = 12 + Math.round(((monetizeRevenue - INITIAL_MONETIZE_REVENUE) / Math.max(1, INITIAL_MONETIZE_REVENUE)) * 100);
+    const growthLabel = `${growthValue >= 0 ? '+' : ''}${growthValue}% vs last`;
 
     return (
       <div className="space-y-8 md:space-y-12 pb-20">
@@ -700,19 +850,33 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
               Monetization OS
             </h2>
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-black tracking-tighter">
-              $12,400<span className="text-white/20">.00</span>
+              {revenueWhole}
+              <span className="text-white/20">.{revenueCents}</span>
             </h1>
             <p className="text-white/40 mt-3 md:mt-4 text-base md:text-lg">
-              Total Revenue this month · <span className="text-emerald-500 font-bold">+12% vs last</span>
+              Total Revenue this month · <span className="text-emerald-500 font-bold">{growthLabel}</span>
             </p>
           </div>
-          <button className="w-full md:w-auto bg-white text-black font-black px-8 py-4 rounded-2xl hover:bg-emerald-400 transition-all shadow-[0_20px_40px_-10px_rgba(255,255,255,0.1)] text-sm md:text-base">
-            Withdraw Funds
+          <button
+            type="button"
+            onClick={handleWithdrawFunds}
+            disabled={isWithdrawing}
+            className={`w-full md:w-auto bg-white text-black font-black px-8 py-4 rounded-2xl transition-all shadow-[0_20px_40px_-10px_rgba(255,255,255,0.1)] text-sm md:text-base ${
+              isWithdrawing ? 'opacity-70 cursor-not-allowed' : 'hover:bg-emerald-400'
+            }`}
+          >
+            {isWithdrawing ? 'Processing...' : 'Withdraw Funds'}
           </button>
         </header>
 
+        {monetizeNotice && (
+          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3">
+            <p className="text-emerald-300 text-xs md:text-sm font-medium">{monetizeNotice}</p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
-          {streams.map((stream) => (
+          {monetizeStreams.map((stream) => (
             <motion.div
               key={stream.id}
               whileHover={{ scale: 1.01 }}
@@ -723,7 +887,11 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
                   <stream.icon className="w-5 h-5 md:w-6 md:h-6" />
                 </div>
                 {'badge' in stream && stream.badge && (
-                  <span className={`px-2 md:px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${stream.id === 2 ? 'bg-emerald-500/20 text-emerald-500' : 'bg-purple-500 text-white'}`}>
+                  <span className={`px-2 md:px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                    stream.id === 2
+                      ? (isTipJarEnabled ? 'bg-emerald-500/20 text-emerald-500' : 'bg-zinc-500/20 text-zinc-300')
+                      : 'bg-purple-500 text-white'
+                  }`}>
                     {stream.badge}
                   </span>
                 )}
@@ -733,14 +901,28 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
               <p className="text-white/40 text-sm mb-6 md:mb-10">{stream.desc}</p>
 
               <div className="flex items-center justify-between mt-auto">
-                <button className="flex items-center gap-2 text-sm font-bold hover:text-white transition-colors">
+                <button
+                  type="button"
+                  onClick={() => handleMonetizeStreamAction(stream.id)}
+                  className="flex items-center gap-2 text-sm font-bold hover:text-white transition-colors"
+                >
                   <Plus className="w-4 h-4" />
                   {stream.action}
                 </button>
                 {'toggle' in stream && stream.toggle && (
-                  <div className="w-12 h-6 bg-emerald-500 rounded-full relative shadow-[0_0_15px_rgba(16,185,129,0.3)] cursor-pointer">
-                    <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full" />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleToggleTipJar}
+                    className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors ${
+                      isTipJarEnabled ? 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'bg-zinc-700'
+                    }`}
+                  >
+                    <motion.div
+                      animate={{ x: isTipJarEnabled ? 24 : 4 }}
+                      transition={{ type: 'spring', stiffness: 460, damping: 30 }}
+                      className="absolute top-1 w-4 h-4 bg-white rounded-full"
+                    />
+                  </button>
                 )}
               </div>
             </motion.div>
@@ -762,10 +944,10 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="text-xs">
-                  {RECENT_TRANSACTIONS.map((tx) => (
+                  {monetizeTransactions.map((tx) => (
                     <tr key={tx.id} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors">
                       <td className="px-6 md:px-8 py-4 md:py-6 font-bold text-white">{tx.user}</td>
-                      <td className="px-6 md:px-8 py-4 md:py-6 text-emerald-400">{tx.amount}</td>
+                      <td className={`px-6 md:px-8 py-4 md:py-6 ${tx.type === 'Withdrawal' ? 'text-amber-300' : 'text-emerald-400'}`}>{tx.amount}</td>
                       <td className="px-6 md:px-8 py-4 md:py-6 text-white/60">{tx.type}</td>
                       <td className="px-6 md:px-8 py-4 md:py-6 text-white/30">{tx.date}</td>
                       <td className="px-6 md:px-8 py-4 md:py-6">
@@ -1051,6 +1233,40 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
 
     return next;
   }, [links, onboarding.links, publish.url]);
+
+  const handleOpenLivePage = async () => {
+    if (isOpeningLivePage) {
+      return;
+    }
+
+    setIsOpeningLivePage(true);
+    const liveSlug = sanitizeLiveSlug(publish.slug || onboarding.vanitySlug || onboarding.claimedName);
+    const liveUrl = `https://vibejam.co/${liveSlug || 'beacons'}`;
+    const liveWindow = window.open(liveUrl, '_blank');
+
+    const payload: CanvasOnboardingPayload = {
+      claimedName: onboarding.claimedName,
+      vanitySlug: publish.slug || onboarding.vanitySlug || onboarding.claimedName,
+      profile: onboarding.profile,
+      selectedTheme: selectedThemeId ?? onboarding.selectedTheme,
+      selectedTemplateId: onboarding.selectedTemplateId,
+      selectedSignals: onboarding.selectedSignals,
+      links: previewLinksRecord,
+    };
+
+    try {
+      const nextPublish = await saveCanvasOnboarding(payload);
+      if (nextPublish?.url && liveWindow && !liveWindow.closed) {
+        liveWindow.location.replace(nextPublish.url);
+      }
+    } catch {
+      if (!liveWindow) {
+        window.location.assign(liveUrl);
+      }
+    } finally {
+      setIsOpeningLivePage(false);
+    }
+  };
 
   const renderThemeViewportForId = (themeId: string, mode: PreviewMode): React.ReactNode => {
     if (themeId === 'isometric-loft-profile') {
@@ -1402,18 +1618,18 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
               <Settings className="w-5 h-5" />
               Settings
             </button>
-            <a
-              href={publish.url}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={handleOpenLivePage}
+              disabled={isOpeningLivePage}
               className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-white text-black hover:bg-white/90 transition-all text-sm font-bold"
             >
               <span className="flex items-center gap-3">
                 <ExternalLink className="w-5 h-5" />
-                Live Page
+                {isOpeningLivePage ? 'Opening...' : 'Live Page'}
               </span>
               <span className="text-[10px] opacity-40">→</span>
-            </a>
+            </button>
           </div>
         </aside>
 

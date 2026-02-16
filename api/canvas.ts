@@ -194,6 +194,33 @@ export default async function handler(req: any, res: any) {
 
     if (method === 'GET') {
       const mode = getQueryValue(req, 'mode');
+      if (mode === 'public') {
+        const rawSlug = getQueryValue(req, 'slug') ?? '';
+        const slug = sanitizeSlug(rawSlug);
+        if (!slug) {
+          return sendJson(res, 400, { error: 'Missing or invalid slug.' });
+        }
+
+        const supabase = await getSupabaseAdmin();
+        const { data, error } = await supabase
+          .from('canvas_profiles')
+          .select('*')
+          .eq('claimed_name', slug)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+
+        if (error) {
+          throw error;
+        }
+
+        const rows = Array.isArray(data) ? data : [];
+        return sendJson(res, 200, {
+          data: {
+            session: rows.length > 0 ? toCanvasSession(rows[0]) : null,
+          },
+        });
+      }
+
       if (mode === 'session') {
         const user = await getAuthenticatedUser(req);
         if (!user) {
