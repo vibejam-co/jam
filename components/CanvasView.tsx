@@ -68,6 +68,37 @@ const THEME_DISPLAY_OVERRIDES: Record<string, { name?: string; desc?: string }> 
   },
 };
 
+const COMMAND_CENTER_ADDITIONAL_THEMES: CanvasTheme[] = [
+  {
+    id: 'isometric-loft-profile',
+    name: 'Isometric Loft Profile',
+    desc: 'A fully interactive 3D CSS-based isometric diorama for creator profiles.',
+    accent: '#22c55e',
+    previewImg: 'https://images.unsplash.com/photo-1493666438817-866a91353ca9?auto=format&fit=crop&q=80&w=800',
+  },
+  {
+    id: 'kinetic-variable-profile',
+    name: 'Kinetic Variable Profile',
+    desc: 'Typography-driven Swiss Brutalist profile reacting to cursor movement.',
+    accent: '#39FF14',
+    previewImg: 'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&q=80&w=800',
+  },
+  {
+    id: 'orbital-lens-spatial-link-in-bio',
+    name: 'Orbital Lens',
+    desc: 'Spatial orbit UI with glass nodes and depth-based interaction.',
+    accent: '#22d3ee',
+    previewImg: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=800',
+  },
+  {
+    id: 'vapor-os',
+    name: 'Vapor OS',
+    desc: 'Retro-futurist desktop shell with draggable glass windows.',
+    accent: '#ff71ce',
+    previewImg: 'https://images.unsplash.com/photo-1518773553398-650c184e0bb3?auto=format&fit=crop&q=80&w=800',
+  },
+];
+
 const normalizeSlug = (value: string): string =>
   value
     .trim()
@@ -824,7 +855,7 @@ const CanvasView: React.FC<CanvasViewProps> = ({
         previewImg: templatePreviewDataUri(hex),
       };
     });
-    return dedupeThemesById([...landingThemesUnique, ...collectionAsThemes]);
+    return dedupeThemesById([...landingThemesUnique, ...collectionAsThemes, ...COMMAND_CENTER_ADDITIONAL_THEMES]);
   }, [landingTemplatesUnique, landingThemesUnique]);
   const activePreviewTheme = useMemo(
     () => themesForDisplay.find((theme) => theme.id === previewTheme) ?? null,

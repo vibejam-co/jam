@@ -59,6 +59,10 @@ import CollageOsCollectionApp from './collection/collageOs/App';
 import TerrariumCollectionApp from './collection/terrarium/App';
 import PrismOsCollectionApp from './collection/prismOs/App';
 import AeroCanvasCollectionApp from './collection/aeroCanvas/App';
+import IsometricLoftApp from './isometricLoft/App';
+import KineticVariableApp from './kineticVariable/App';
+import OrbitalLensApp from './orbitalLens/App';
+import VaporOsApp from './vaporOs/App';
 import type { CanvasOnboardingPayload, CanvasPublishResult, CanvasTheme } from '../types';
 
 type DashboardTab = 'canvas' | 'themes' | 'monetize' | 'audience' | 'analytics';
@@ -140,6 +144,50 @@ const SUBSCRIBERS = [
 ] as const;
 
 const clickPresets = ['2.4k', '1.8k', '942', '811', '620'];
+
+const ACCENT_TOKEN_MAP: Record<string, string> = {
+  'cyan-400': '#22d3ee',
+  'yellow-400': '#facc15',
+  'rose-500': '#f43f5e',
+  'purple-500': '#a855f7',
+  'blue-400': '#60a5fa',
+  'green-400': '#4ade80',
+  'fuchsia-400': '#e879f9',
+  'amber-300': '#fcd34d',
+  'emerald-400': '#34d399',
+  'zinc-300': '#d4d4d8',
+  'sky-300': '#7dd3fc',
+  'violet-400': '#a78bfa',
+  'lime-400': '#a3e635',
+  'cyan-300': '#67e8f9',
+  'indigo-300': '#a5b4fc',
+  'blue-300': '#93c5fd',
+  'stone-300': '#d6d3d1',
+  'teal-300': '#5eead4',
+  'amber-400': '#fbbf24',
+  'slate-300': '#cbd5e1',
+  'violet-300': '#c4b5fd',
+  'yellow-300': '#fde047',
+};
+
+const resolveAccentColor = (value: string): string => {
+  if (!value) return '#a855f7';
+  if (value.startsWith('#')) return value;
+  return ACCENT_TOKEN_MAP[value] ?? '#a855f7';
+};
+
+const hexToRgba = (hex: string, alpha: number): string => {
+  const normalized = hex.replace('#', '');
+  const expanded = normalized.length === 3
+    ? normalized.split('').map((ch) => ch + ch).join('')
+    : normalized;
+  const parsed = Number.parseInt(expanded.slice(0, 6), 16);
+  if (Number.isNaN(parsed)) return `rgba(168, 85, 247, ${alpha})`;
+  const r = (parsed >> 16) & 255;
+  const g = (parsed >> 8) & 255;
+  const b = parsed & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
 
 const getThemePreviewFamily = (themeId: string): ThemePreviewFamily => {
   const id = themeId.toLowerCase();
@@ -283,11 +331,14 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
   const [isTuning, setIsTuning] = useState(false);
   const [isRebooting, setIsRebooting] = useState(false);
   const [overrides, setOverrides] = useState<ThemeOverrides>({
-    accentColor: themes.find((item) => item.id === onboarding.selectedTheme)?.accent ?? '#a855f7',
+    accentColor: resolveAccentColor(themes.find((item) => item.id === onboarding.selectedTheme)?.accent ?? '#a855f7'),
     fontFamily: 'Inter',
     cornerRadius: 16,
     bouncyMode: true,
   });
+  const resolvedAccentColor = resolveAccentColor(overrides.accentColor);
+  const accentRingSoft = hexToRgba(resolvedAccentColor, 0.32);
+  const accentRingStrong = hexToRgba(resolvedAccentColor, 0.55);
 
   const profile = useMemo<DashboardProfile>(
     () => ({
@@ -348,7 +399,7 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
   const handleThemeChange = (theme: CanvasTheme) => {
     setIsRebooting(true);
     setSelectedThemeId(theme.id);
-    setOverrides((prev) => ({ ...prev, accentColor: theme.accent }));
+    setOverrides((prev) => ({ ...prev, accentColor: resolveAccentColor(theme.accent) }));
     window.setTimeout(() => setIsRebooting(false), 450);
   };
 
@@ -598,10 +649,14 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
             <motion.button
               key={theme.id}
               type="button"
-              whileHover={{ y: -8 }}
+              whileHover={{ y: overrides.bouncyMode ? -10 : -4 }}
+              whileTap={{ scale: overrides.bouncyMode ? 0.985 : 0.995 }}
               onClick={() => handleThemeChange(theme)}
               className={`group relative aspect-[3/4] rounded-[2.5rem] border-2 transition-all cursor-pointer overflow-hidden text-left ${isSelected ? 'border-purple-500 shadow-[0_0_30px_rgba(168,85,247,0.15)]' : 'border-white/5 hover:border-white/20'}`}
-              style={{ borderRadius: `${overrides.cornerRadius + 20}px` }}
+              style={{
+                borderRadius: `${overrides.cornerRadius + 20}px`,
+                boxShadow: isSelected ? `0 0 0 1px ${accentRingStrong}, 0 0 26px ${accentRingSoft}` : undefined,
+              }}
             >
               {renderThemeCardThumbnail(theme)}
               <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/55 to-black/5 group-hover:via-black/45 transition-all duration-500" />
@@ -998,6 +1053,35 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
   }, [links, onboarding.links, publish.url]);
 
   const renderThemeViewportForId = (themeId: string, mode: PreviewMode): React.ReactNode => {
+    if (themeId === 'isometric-loft-profile') {
+      return (
+        <div className="h-full overflow-auto bg-[#f8f1e5]">
+          <IsometricLoftApp forcedViewport={mode} />
+        </div>
+      );
+    }
+    if (themeId === 'kinetic-variable-profile') {
+      return (
+        <div className="h-full overflow-auto bg-black">
+          <KineticVariableApp forcedViewport={mode} />
+        </div>
+      );
+    }
+    if (themeId === 'orbital-lens-spatial-link-in-bio') {
+      return (
+        <div className="h-full overflow-auto bg-[#07071a]">
+          <OrbitalLensApp forcedViewport={mode} />
+        </div>
+      );
+    }
+    if (themeId === 'vapor-os') {
+      return (
+        <div className="h-full overflow-auto bg-[#210938]">
+          <VaporOsApp forcedViewport={mode} />
+        </div>
+      );
+    }
+
     if (themeId.startsWith('collection-')) {
       const collectionId = themeId.replace('collection-', '');
       switch (collectionId) {
@@ -1095,12 +1179,22 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
   const renderThemeCardThumbnail = (theme: CanvasTheme): React.ReactNode => (
     <div className="absolute inset-0 pointer-events-none isolate overflow-hidden [transform:translateZ(0)]">
       <div
-        className="h-full w-full overflow-hidden [transform:translateZ(0)] [contain:layout_paint_style]"
-        style={{ WebkitTransform: 'translateZ(0)' }}
+        className="h-full w-full overflow-hidden [transform:translateZ(0)] [contain:layout_paint_style] [mask-image:linear-gradient(to_bottom,black_0%,black_58%,transparent_90%)]"
+        style={{
+          WebkitTransform: 'translateZ(0)',
+          borderRadius: `${Math.max(8, overrides.cornerRadius + 4)}px`,
+          boxShadow: `inset 0 0 0 1px ${hexToRgba(resolvedAccentColor, 0.15)}`,
+        }}
       >
-        {renderThemeViewportForId(theme.id, 'mobile')}
+        <motion.div
+          className="h-full w-full scale-[0.97] -translate-y-[2%]"
+          animate={overrides.bouncyMode ? { y: [0, -3, 0, 2, 0] } : { y: 0 }}
+          transition={overrides.bouncyMode ? { duration: 4.8, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
+        >
+          {renderThemeViewportForId(theme.id, 'mobile')}
+        </motion.div>
       </div>
-      <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/45 to-black/90" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/8 via-black/35 to-black/92" />
     </div>
   );
 
@@ -1111,7 +1205,17 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
           <div className={`relative h-full w-full overflow-hidden transition-all duration-700 ${isRebooting ? 'opacity-0 scale-95 blur-xl' : 'opacity-100 scale-100 blur-0'}`}>
             <div className="absolute inset-0 overflow-hidden bg-black">
               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-6 bg-black rounded-b-2xl z-50" />
-              {renderLiveThemeViewport('mobile')}
+              <motion.div
+                className="h-full w-full"
+                style={{
+                  borderRadius: `${Math.max(10, overrides.cornerRadius + 6)}px`,
+                  boxShadow: `inset 0 0 0 1px ${hexToRgba(resolvedAccentColor, 0.22)}`,
+                }}
+                animate={overrides.bouncyMode ? { scale: [1, 1.008, 1] } : { scale: 1 }}
+                transition={overrides.bouncyMode ? { duration: 2.6, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
+              >
+                {renderLiveThemeViewport('mobile')}
+              </motion.div>
             </div>
           </div>
 
@@ -1145,7 +1249,17 @@ const CanvasCommandDashboard: React.FC<CanvasCommandDashboardProps> = ({
           </div>
         </div>
         <div className="relative h-[calc(100%-48px)] w-full overflow-hidden">
-          <div className="absolute inset-0 overflow-auto bg-black">{renderLiveThemeViewport('desktop')}</div>
+          <motion.div
+            className="absolute inset-0 overflow-auto bg-black"
+            style={{
+              borderRadius: `${Math.max(10, overrides.cornerRadius + 2)}px`,
+              boxShadow: `inset 0 0 0 1px ${hexToRgba(resolvedAccentColor, 0.18)}`,
+            }}
+            animate={overrides.bouncyMode ? { y: [0, -1, 0] } : { y: 0 }}
+            transition={overrides.bouncyMode ? { duration: 2.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
+          >
+            {renderLiveThemeViewport('desktop')}
+          </motion.div>
         </div>
       </div>
     );
