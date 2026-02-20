@@ -8,7 +8,13 @@ import { MapWidget } from './widgets/MapWidget';
 import { VideoWidget } from './widgets/VideoWidget';
 import { Cloud, Edit3 } from 'lucide-react';
 
-export const WidgetCard: React.FC<WidgetCardProps> = ({ widget, isActive, onActivate, compact = false }) => {
+export const WidgetCard: React.FC<WidgetCardProps> = ({
+  widget,
+  isActive,
+  onActivate,
+  compact = false,
+  profileOverride,
+}) => {
   const getSpanClasses = (size: string, compact: boolean) => {
     if (compact) {
       return 'col-span-1 row-span-1';
@@ -47,7 +53,7 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({ widget, isActive, onActi
       <div className="absolute inset-0 z-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
       
       <div className="relative z-10 w-full h-full">
-        {widget.type === 'profile' && <ProfileWidget />}
+        {widget.type === 'profile' && <ProfileWidget profileOverride={profileOverride} />}
         {widget.type === 'music' && <MusicWidget />}
         {widget.type === 'map' && <MapWidget />}
         {widget.type === 'video' && <VideoWidget />}

@@ -42,7 +42,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-xl flex justify-end"
+      className="fixed inset-0 z-[410] bg-black/90 backdrop-blur-xl flex justify-end"
     >
       {/* Backdrop click close */}
       <div className="absolute inset-0" onClick={onClose} />

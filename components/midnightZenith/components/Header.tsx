@@ -53,10 +53,12 @@ const Header: React.FC<HeaderProps> = ({ data, compact = false }) => {
                   {data.handle}
                 </p>
                 {!compact && <div className="h-px flex-1 bg-white/10 hidden md:block" />}
-                <div className="flex items-center gap-3">
-                   <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                   <span className="text-[10px] font-cinema tracking-widest text-white/30 uppercase">Artist Verified</span>
-                </div>
+                {data.verified !== false && (
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-[10px] font-cinema tracking-widest text-white/30 uppercase">Artist Verified</span>
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>

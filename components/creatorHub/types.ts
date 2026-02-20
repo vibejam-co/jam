@@ -42,3 +42,28 @@ export interface TimelineEntry {
   content: string;
   icon?: React.ReactNode;
 }
+
+export type CreatorHubSectionKey =
+  | 'social_row'
+  | 'top_actions'
+  | 'featured_release'
+  | 'boutique_shelf'
+  | 'trusted_proof'
+  | 'vibejam_log';
+
+export interface CreatorHubSectionState {
+  key: CreatorHubSectionKey;
+  label: string;
+  visible: boolean;
+  position: number;
+}
+
+export interface CreatorHubRenderModel {
+  socials: SocialLink[];
+  topActions: Array<{ id: string; title: string; url: string }>;
+  products: Product[];
+  featuredRelease: Product;
+  trustBadgeLabels: string[];
+  logEntries: Array<{ id: string; date: string; title: string; content: string }>;
+  sections: CreatorHubSectionState[];
+}

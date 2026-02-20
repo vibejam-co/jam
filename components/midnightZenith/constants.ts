@@ -77,3 +77,15 @@ export const GRID_ITEMS: GridContent[] = [
     accentColor: '#8800ff'
   }
 ];
+
+export const MIDNIGHT_FOOTER = {
+  headline: 'STAY IN THE LOOP',
+  subheadline: 'New drops every Friday at Midnight',
+  socials: [
+    { id: 'footer-instagram', label: 'Instagram', href: 'https://instagram.com/vibejamco' },
+    { id: 'footer-twitter', label: 'Twitter', href: 'https://x.com/vibejamco' },
+    { id: 'footer-vimeo', label: 'Vimeo', href: 'https://vimeo.com' },
+    { id: 'footer-discord', label: 'Discord', href: 'https://discord.gg/vibejam' },
+  ],
+  tagline: 'Designed for Immersion © 2025',
+};

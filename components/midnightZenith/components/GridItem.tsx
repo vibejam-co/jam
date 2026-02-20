@@ -85,7 +85,7 @@ const GridItem: React.FC<GridItemProps> = ({ item, isFocused, isAnyFocused, onFo
 
       {/* Badges */}
       <div className="absolute top-4 left-4 flex gap-2">
-        {Math.random() > 0.7 && (
+        {item.live && (
           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white font-cinema uppercase tracking-tighter">
             Live
           </span>
@@ -98,7 +98,7 @@ const GridItem: React.FC<GridItemProps> = ({ item, isFocused, isAnyFocused, onFo
           animate={isFocused ? { opacity: 1, x: 0 } : { opacity: 0.6, x: 0 }}
           className="text-[10px] md:text-xs font-cinema tracking-[0.25em] text-white/50 uppercase mb-1"
         >
-          {item.subtitle}
+          {item.category || item.subtitle}
         </motion.span>
         <motion.h3
           className="text-lg md:text-2xl font-bold font-cinema tracking-tight leading-tight"

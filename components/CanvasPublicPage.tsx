@@ -16,6 +16,7 @@ import CollageOsCollectionApp from './collection/collageOs/App';
 import TerrariumCollectionApp from './collection/terrarium/App';
 import PrismOsCollectionApp from './collection/prismOs/App';
 import AeroCanvasCollectionApp from './collection/aeroCanvas/App';
+import ThemeMonetizationOverlay from './monetization/ThemeMonetizationOverlay';
 
 interface CanvasPublicPageProps {
   slug: string;
@@ -42,6 +43,8 @@ const CanvasPublicPage: React.FC<CanvasPublicPageProps> = ({ slug }) => {
   const [session, setSession] = useState<CanvasDashboardSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isProductsOpen, setIsProductsOpen] = useState(false);
+  const [isBrandCollabsOpen, setIsBrandCollabsOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,7 +76,18 @@ const CanvasPublicPage: React.FC<CanvasPublicPageProps> = ({ slug }) => {
 
   const selectedThemeId = session?.onboarding.selectedTheme ?? 'midnight-zenith';
   const previewLinks = useMemo(() => session?.onboarding.links ?? {}, [session?.onboarding.links]);
-
+  const monetization = session?.onboarding.monetization ?? {
+    tipJarEnabled: false,
+    tipJarUrl: '',
+    products: [],
+    brandCollabs: {
+      enabled: false,
+      contactEmail: '',
+      rateCardUrl: '',
+      minBudgetUsd: 500,
+      inbox: [],
+    },
+  };
   if (isLoading) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -104,62 +118,212 @@ const CanvasPublicPage: React.FC<CanvasPublicPageProps> = ({ slug }) => {
     );
   }
 
-  if (selectedThemeId === 'isometric-loft-profile') {
-    return <IsometricLoftApp />;
-  }
-  if (selectedThemeId === 'kinetic-variable-profile') {
-    return <KineticVariableApp />;
-  }
-  if (selectedThemeId === 'orbital-lens-spatial-link-in-bio') {
-    return <OrbitalLensApp />;
-  }
-  if (selectedThemeId === 'vapor-os') {
-    return <VaporOsApp />;
-  }
-  if (selectedThemeId.startsWith('collection-')) {
-    const collectionId = selectedThemeId.replace('collection-', '');
-    switch (collectionId) {
-      case 'gold-standard':
-        return <GoldStandardCollectionApp />;
-      case 'accordion-deck':
-        return <AccordionDeckCollectionApp />;
-      case 'collage-os':
-        return <CollageOsCollectionApp />;
-      case 'terrarium':
-        return <TerrariumCollectionApp />;
-      case 'prism-os':
-        return <PrismOsCollectionApp />;
-      case 'aero-canvas':
-        return <AeroCanvasCollectionApp />;
-      default:
-        return <MidnightZenithApp />;
+  const renderThemeContent = (): React.ReactNode => {
+    if (selectedThemeId === 'isometric-loft-profile') {
+      return <IsometricLoftApp />;
     }
-  }
-
-  const family = getThemeFamily(selectedThemeId);
-  switch (family) {
-    case 'editorial':
-      return <EditorialKineticProfile />;
-    case 'creator':
+    if (selectedThemeId === 'kinetic-variable-profile') {
+      return <KineticVariableApp />;
+    }
+    if (selectedThemeId === 'orbital-lens-spatial-link-in-bio') {
       return (
-        <CreatorHubApp
+        <OrbitalLensApp
           profileOverride={{
             name: session.onboarding.profile.name,
-            bio: session.onboarding.profile.bio,
             avatar: session.onboarding.profile.avatar,
+            handle: `@${session.publish.slug}`,
           }}
-          linksOverride={previewLinks}
-          slugOverride={session.publish.slug}
         />
       );
-    case 'aurora':
-      return <EtherealLiquidApp />;
-    case 'glass':
-      return <GlassArtifactApp />;
-    case 'midnight':
-    default:
-      return <MidnightZenithApp />;
-  }
+    }
+    if (selectedThemeId === 'vapor-os') {
+      return <VaporOsApp />;
+    }
+    if (selectedThemeId.startsWith('collection-')) {
+      const collectionId = selectedThemeId.replace('collection-', '');
+      switch (collectionId) {
+        case 'gold-standard':
+          return <GoldStandardCollectionApp />;
+        case 'accordion-deck':
+          return <AccordionDeckCollectionApp />;
+        case 'collage-os':
+          return <CollageOsCollectionApp />;
+        case 'terrarium':
+          return <TerrariumCollectionApp />;
+        case 'prism-os':
+          return <PrismOsCollectionApp />;
+        case 'aero-canvas':
+          return <AeroCanvasCollectionApp />;
+        default:
+          return <MidnightZenithApp />;
+      }
+    }
+
+    const family = getThemeFamily(selectedThemeId);
+    switch (family) {
+      case 'editorial':
+        return <EditorialKineticProfile />;
+      case 'creator':
+        return (
+          <CreatorHubApp
+            profileOverride={{
+              name: session.onboarding.profile.name,
+              bio: session.onboarding.profile.bio,
+              avatar: session.onboarding.profile.avatar,
+            }}
+            linksOverride={previewLinks}
+            slugOverride={session.publish.slug}
+          />
+        );
+      case 'aurora':
+        return (
+          <EtherealLiquidApp
+            profileOverride={{
+              name: session.onboarding.profile.name,
+              bio: session.onboarding.profile.bio,
+              avatar: session.onboarding.profile.avatar,
+              handle: `@${session.publish.slug}`,
+            }}
+          />
+        );
+      case 'glass':
+        return (
+          <GlassArtifactApp
+            profileOverride={{
+              name: session.onboarding.profile.name,
+              bio: session.onboarding.profile.bio,
+              avatar: session.onboarding.profile.avatar,
+              handle: `@${session.publish.slug}`,
+            }}
+          />
+        );
+      case 'midnight':
+      default:
+        return (
+          <MidnightZenithApp
+            profileOverride={{
+              name: session.onboarding.profile.name,
+              bio: session.onboarding.profile.bio,
+              avatar: session.onboarding.profile.avatar,
+              handle: `@${session.publish.slug}`,
+            }}
+          />
+        );
+    }
+  };
+
+  return (
+    <div className="relative min-h-screen">
+      {renderThemeContent()}
+      <ThemeMonetizationOverlay
+        tipJarEnabled={Boolean(monetization.tipJarEnabled)}
+        tipJarUrl={monetization.tipJarUrl}
+        products={monetization.products}
+        brandCollabsEnabled={Boolean(monetization.brandCollabs?.enabled)}
+        fixed
+        onOpenProducts={() => setIsProductsOpen(true)}
+        onOpenBrandCollabs={() => setIsBrandCollabsOpen(true)}
+      />
+
+      {isProductsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <button
+            type="button"
+            onClick={() => setIsProductsOpen(false)}
+            className="absolute inset-0"
+            aria-label="Close products"
+          />
+          <div className="relative w-full max-w-lg rounded-3xl border border-white/10 bg-[#0A0A0A] p-5 sm:p-6 text-white">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg sm:text-xl font-black tracking-tight">Digital Drops</h2>
+              <button
+                type="button"
+                onClick={() => setIsProductsOpen(false)}
+                className="w-8 h-8 rounded-full border border-white/10 hover:bg-white/10"
+              >
+                ×
+              </button>
+            </div>
+            <div className="space-y-3 max-h-[50vh] overflow-auto pr-1">
+              {monetization.products.length === 0 && (
+                <p className="text-sm text-white/50">No products listed yet.</p>
+              )}
+              {monetization.products.map((product) => (
+                <div key={product.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-bold text-sm sm:text-base">{product.title}</h3>
+                      {product.description && <p className="text-xs text-white/50 mt-1">{product.description}</p>}
+                      <span className="mt-2 inline-flex px-2 py-1 rounded-full bg-white/10 text-[10px] uppercase tracking-wider">
+                        {product.category}
+                      </span>
+                    </div>
+                    <span className="font-black text-emerald-300">${product.priceUsd.toFixed(2)}</span>
+                  </div>
+                  <a
+                    href={product.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-3 inline-flex px-3 py-2 rounded-xl bg-white text-black text-xs font-bold hover:bg-white/90"
+                  >
+                    Buy Now
+                  </a>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isBrandCollabsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <button
+            type="button"
+            onClick={() => setIsBrandCollabsOpen(false)}
+            className="absolute inset-0"
+            aria-label="Close collabs"
+          />
+          <div className="relative w-full max-w-lg rounded-3xl border border-white/10 bg-[#0A0A0A] p-5 sm:p-6 text-white">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg sm:text-xl font-black tracking-tight">Work With {session.onboarding.profile.name}</h2>
+              <button
+                type="button"
+                onClick={() => setIsBrandCollabsOpen(false)}
+                className="w-8 h-8 rounded-full border border-white/10 hover:bg-white/10"
+              >
+                ×
+              </button>
+            </div>
+            <div className="space-y-3 text-sm text-white/80">
+              <p>Brand collabs are open for inbound sponsorship campaigns.</p>
+              <p>
+                Contact:{' '}
+                <a
+                  href={`mailto:${monetization.brandCollabs?.contactEmail || 'collabs@vibejam.co'}`}
+                  className="text-emerald-300 font-semibold"
+                >
+                  {monetization.brandCollabs?.contactEmail || 'collabs@vibejam.co'}
+                </a>
+              </p>
+              {Number.isFinite(monetization.brandCollabs?.minBudgetUsd) && (
+                <p>Minimum campaign budget: ${Number(monetization.brandCollabs?.minBudgetUsd).toFixed(0)}</p>
+              )}
+              {monetization.brandCollabs?.rateCardUrl && (
+                <a
+                  href={monetization.brandCollabs.rateCardUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex px-3 py-2 rounded-xl bg-white text-black text-xs font-bold hover:bg-white/90"
+                >
+                  View Rate Card
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default CanvasPublicPage;

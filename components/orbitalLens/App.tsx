@@ -4,6 +4,11 @@ import { Globe, Github, Instagram, Linkedin, Mail, Music, ShoppingBag, Twitter, 
 
 type OrbitalLensAppProps = {
   forcedViewport?: 'mobile' | 'desktop';
+  profileOverride?: {
+    name?: string;
+    avatar?: string;
+    handle?: string;
+  };
 };
 
 type OrbitalLink = {
@@ -37,7 +42,7 @@ const buildLinks = (isMobile: boolean): OrbitalLink[] => [
   {
     id: 'shop',
     label: 'Merch',
-    url: 'https://shop.example.com',
+    url: 'https://www.vibejam.co/marketplace',
     icon: <ShoppingBag size={isMobile ? 18 : 24} />,
     orbitRadius: isMobile ? 110 : 180,
     speed: 25,
@@ -120,7 +125,7 @@ const buildLinks = (isMobile: boolean): OrbitalLink[] => [
       ]),
 ];
 
-const OrbitalLensApp: React.FC<OrbitalLensAppProps> = ({ forcedViewport = 'desktop' }) => {
+const OrbitalLensApp: React.FC<OrbitalLensAppProps> = ({ forcedViewport = 'desktop', profileOverride }) => {
   const isMobile = forcedViewport === 'mobile';
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -130,6 +135,15 @@ const OrbitalLensApp: React.FC<OrbitalLensAppProps> = ({ forcedViewport = 'deskt
   const rotateX = useSpring(useTransform(mouseY, [-500, 500], [15, -15]), { stiffness: 100, damping: 30 });
   const rotateY = useSpring(useTransform(mouseX, [-500, 500], [-15, 15]), { stiffness: 100, damping: 30 });
   const links = useMemo(() => buildLinks(isMobile), [isMobile]);
+  const creator = useMemo(
+    () => ({
+      ...CREATOR,
+      name: profileOverride?.name?.trim() || CREATOR.name,
+      avatarUrl: profileOverride?.avatar?.trim() || CREATOR.avatarUrl,
+      handle: profileOverride?.handle?.trim() || CREATOR.handle,
+    }),
+    [profileOverride?.avatar, profileOverride?.handle, profileOverride?.name],
+  );
   const stars = useMemo(
     () =>
       Array.from({ length: isMobile ? 90 : 150 }).map((_, i) => ({
@@ -208,11 +222,11 @@ const OrbitalLensApp: React.FC<OrbitalLensAppProps> = ({ forcedViewport = 'deskt
             transition={{ type: 'spring', stiffness: 300 }}
           >
             <div className="w-full h-full rounded-full overflow-hidden bg-black border-2 border-white/20">
-              <img src={CREATOR.avatarUrl} alt={CREATOR.name} className="w-full h-full object-cover" />
+              <img src={creator.avatarUrl} alt={creator.name} className="w-full h-full object-cover" />
             </div>
             <div className={`absolute ${isMobile ? '-bottom-12' : '-bottom-14'} left-1/2 -translate-x-1/2 text-center pointer-events-none`}>
-              <h1 className={`${isMobile ? 'text-sm' : 'text-xl'} font-bold text-white tracking-tight drop-shadow-md`}>{CREATOR.name}</h1>
-              <p className={`${isMobile ? 'text-[10px]' : 'text-sm'} text-cyan-400 font-medium opacity-80`}>{CREATOR.handle}</p>
+              <h1 className={`${isMobile ? 'text-sm' : 'text-xl'} font-bold text-white tracking-tight drop-shadow-md`}>{creator.name}</h1>
+              <p className={`${isMobile ? 'text-[10px]' : 'text-sm'} text-cyan-400 font-medium opacity-80`}>{creator.handle}</p>
             </div>
           </motion.div>
 

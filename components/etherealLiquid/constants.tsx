@@ -14,7 +14,7 @@ export const LINKS_DATA: LinkItem[] = [
   {
     id: '1',
     title: "Portfolio 2026",
-    url: "#",
+    url: "https://www.vibejam.co",
     icon: "Briefcase",
     description: "Latest works in immersive UI",
     size: 'large'
@@ -22,21 +22,21 @@ export const LINKS_DATA: LinkItem[] = [
   {
     id: '2',
     title: "Instagram",
-    url: "#",
+    url: "https://www.instagram.com",
     icon: "Instagram",
     size: 'small'
   },
   {
     id: '3',
     title: "Twitter",
-    url: "#",
+    url: "https://x.com",
     icon: "Twitter",
     size: 'small'
   },
   {
     id: '4',
     title: "The Lab Blog",
-    url: "#",
+    url: "https://medium.com",
     icon: "BookOpen",
     description: "Weekly thoughts on design",
     size: 'medium'
@@ -44,7 +44,7 @@ export const LINKS_DATA: LinkItem[] = [
   {
     id: '5',
     title: "Newsletter",
-    url: "#",
+    url: "mailto:hello@vibejam.co",
     icon: "Mail",
     size: 'medium'
   }

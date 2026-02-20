@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Instagram, 
@@ -30,9 +30,15 @@ type Tab = 'links' | 'music' | 'stats';
 
 interface VibeJamProfileProps {
   forcedViewport?: 'mobile' | 'desktop';
+  profileOverride?: {
+    name?: string;
+    bio?: string;
+    avatar?: string;
+    handle?: string;
+  };
 }
 
-const VibeJamProfile: React.FC<VibeJamProfileProps> = ({ forcedViewport }) => {
+const VibeJamProfile: React.FC<VibeJamProfileProps> = ({ forcedViewport, profileOverride }) => {
   const [activeTab, setActiveTab] = useState<Tab>('links');
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [isCompactByWidth, setIsCompactByWidth] = useState(false);
@@ -52,6 +58,16 @@ const VibeJamProfile: React.FC<VibeJamProfileProps> = ({ forcedViewport }) => {
   }, [forcedViewport]);
 
   const isCompact = forcedViewport ? forcedViewport === 'mobile' : isCompactByWidth;
+  const userData = useMemo(
+    () => ({
+      ...USER_DATA,
+      name: profileOverride?.name?.trim() || USER_DATA.name,
+      bio: profileOverride?.bio?.trim() || USER_DATA.bio,
+      avatar: profileOverride?.avatar?.trim() || USER_DATA.avatar,
+      handle: profileOverride?.handle?.trim() || USER_DATA.handle,
+    }),
+    [profileOverride?.avatar, profileOverride?.bio, profileOverride?.handle, profileOverride?.name],
+  );
 
   return (
     <div ref={rootRef} className="relative min-h-screen w-full flex flex-col items-center bg-[#F0F4F8] selection:bg-violet-200/50 overflow-x-hidden">
@@ -90,29 +106,29 @@ const VibeJamProfile: React.FC<VibeJamProfileProps> = ({ forcedViewport }) => {
           <div className="relative group mb-6">
             <div className="absolute inset-0 bg-white/40 blur-2xl group-hover:blur-3xl transition-all duration-500 rounded-full" />
             <img 
-              src={USER_DATA.avatar} 
-              alt={USER_DATA.name} 
+              src={userData.avatar} 
+              alt={userData.name} 
               className={`relative rounded-full border-2 border-white/50 shadow-xl object-cover ${isCompact ? 'w-24 h-24' : 'w-28 h-28 md:w-32 md:h-32'}`}
             />
           </div>
           <h1 className={`font-medium text-slate-900/90 mb-1 tracking-tight ${isCompact ? 'text-2xl' : 'text-3xl md:text-4xl'}`}>
-            {USER_DATA.name}
+            {userData.name}
           </h1>
           <p className="text-slate-500 font-light mb-4">
-            {USER_DATA.handle}
+            {userData.handle}
           </p>
           <p className="max-w-md text-slate-700/80 font-light leading-relaxed mb-6 px-4">
-            {USER_DATA.bio}
+            {userData.bio}
           </p>
           
           <div className={`flex mb-8 ${isCompact ? 'gap-5' : 'gap-8'}`}>
             <div className="text-center">
-              <span className={`block font-medium text-slate-800 ${isCompact ? 'text-lg' : 'text-xl'}`}>{USER_DATA.followers}</span>
+              <span className={`block font-medium text-slate-800 ${isCompact ? 'text-lg' : 'text-xl'}`}>{userData.followers}</span>
               <span className="text-xs font-light text-slate-400 uppercase tracking-widest">Followers</span>
             </div>
             <div className="h-10 w-[1px] bg-slate-200 self-center" />
             <div className="text-center">
-              <span className={`block font-medium text-slate-800 ${isCompact ? 'text-lg' : 'text-xl'}`}>{USER_DATA.following}</span>
+              <span className={`block font-medium text-slate-800 ${isCompact ? 'text-lg' : 'text-xl'}`}>{userData.following}</span>
               <span className="text-xs font-light text-slate-400 uppercase tracking-widest">Following</span>
             </div>
           </div>

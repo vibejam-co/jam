@@ -164,6 +164,52 @@ const parseLegacyDashboardSession = (value: unknown): CanvasDashboardSession | n
           (entry): entry is [string, string] => typeof entry[1] === 'string',
         ),
       ),
+      linkItems: Array.isArray(onboarding.linkItems)
+        ? onboarding.linkItems
+            .filter(
+              (item): item is { id: string; title: string; url: string; clicks?: string } =>
+                isRecord(item) &&
+                typeof item.id === 'string' &&
+                typeof item.title === 'string' &&
+                typeof item.url === 'string',
+            )
+            .map((item) => ({
+              id: item.id,
+              title: item.title,
+              url: item.url,
+              clicks: typeof item.clicks === 'string' ? item.clicks : undefined,
+            }))
+        : undefined,
+      themeContainers: isRecord(onboarding.themeContainers)
+        ? Object.fromEntries(
+            Object.entries(onboarding.themeContainers)
+              .filter((entry): entry is [string, unknown[]] => Array.isArray(entry[1]))
+              .map(([themeId, rawItems]) => [
+                themeId,
+                rawItems
+                  .filter(
+                    (item): item is Record<string, unknown> =>
+                      isRecord(item) && typeof item.id === 'string' && typeof item.title === 'string',
+                  )
+                  .map((item) => ({
+                    id: String(item.id),
+                    size: item.size === 'full' || item.size === 'standard' || item.size === 'profile' ? item.size : 'standard',
+                    kind: item.kind === 'link' || item.kind === 'image' || item.kind === 'widget' || item.kind === 'note' ? item.kind : 'note',
+                    title: String(item.title),
+                    subtitle: typeof item.subtitle === 'string' ? item.subtitle : undefined,
+                    url: typeof item.url === 'string' ? item.url : undefined,
+                    mediaUrl: typeof item.mediaUrl === 'string' ? item.mediaUrl : undefined,
+                  })),
+              ])
+              .filter((entry) => entry[1].length > 0),
+          )
+        : undefined,
+      monetization: isRecord(onboarding.monetization)
+        ? (onboarding.monetization as unknown as CanvasOnboardingPayload['monetization'])
+        : undefined,
+      layout: isRecord(onboarding.layout)
+        ? (onboarding.layout as unknown as CanvasOnboardingPayload['layout'])
+        : undefined,
     },
     publish: {
       success: true,

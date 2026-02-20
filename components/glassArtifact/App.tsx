@@ -4,9 +4,15 @@ import { GlassOSProfile } from './components/GlassOSProfile';
 
 interface GlassArtifactAppProps {
   forcedViewport?: 'mobile' | 'desktop';
+  profileOverride?: {
+    name?: string;
+    bio?: string;
+    avatar?: string;
+    handle?: string;
+  };
 }
 
-const App: React.FC<GlassArtifactAppProps> = ({ forcedViewport }) => {
+const App: React.FC<GlassArtifactAppProps> = ({ forcedViewport, profileOverride }) => {
   const isCompact = forcedViewport === 'mobile';
   return (
     <div className={`min-h-screen w-full mesh-gradient relative overflow-hidden flex justify-center ${isCompact ? 'items-start p-2 pt-4' : 'items-start md:items-center p-3 md:p-8 pt-6 md:pt-8'}`}>
@@ -17,7 +23,7 @@ const App: React.FC<GlassArtifactAppProps> = ({ forcedViewport }) => {
       </div>
       
       <div className={`relative z-10 w-full mx-auto ${isCompact ? 'max-w-5xl' : 'max-w-7xl'}`}>
-        <GlassOSProfile forcedViewport={forcedViewport} />
+        <GlassOSProfile forcedViewport={forcedViewport} profileOverride={profileOverride} />
       </div>
     </div>
   );

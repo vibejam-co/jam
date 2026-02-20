@@ -2,15 +2,15 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { GardenItemProps } from '../types';
-import { Instagram, Music, Mail, Map, User, Briefcase } from 'lucide-react';
+import { Instagram, Music, Mail, User, Briefcase } from 'lucide-react';
 
 const BeanstalkMobile: React.FC<GardenItemProps> = ({ wind }) => {
   const items = [
-    { label: 'Instagram', icon: <Instagram />, color: 'bg-pink-100' },
-    { label: 'Newsletter', icon: <Mail />, color: 'bg-amber-100' },
-    { label: 'Spotify', icon: <Music />, color: 'bg-emerald-100' },
-    { label: 'Portfolio', icon: <Briefcase />, color: 'bg-sky-100' },
-    { label: 'About', icon: <User />, color: 'bg-purple-100' },
+    { label: 'Instagram', icon: <Instagram />, color: 'bg-pink-100', href: 'https://instagram.com/vibejamco' },
+    { label: 'Newsletter', icon: <Mail />, color: 'bg-amber-100', href: 'mailto:hello@vibejam.co' },
+    { label: 'Spotify', icon: <Music />, color: 'bg-emerald-100', href: 'https://open.spotify.com' },
+    { label: 'Portfolio', icon: <Briefcase />, color: 'bg-sky-100', href: 'https://www.vibejam.co' },
+    { label: 'About', icon: <User />, color: 'bg-purple-100', href: 'https://www.vibejam.co/canvas' },
   ];
 
   return (
@@ -49,7 +49,9 @@ const BeanstalkMobile: React.FC<GardenItemProps> = ({ wind }) => {
             <div className={`absolute top-1/2 -translate-y-1/2 w-20 h-0.5 bg-[#A3B18A] ${i % 2 === 0 ? 'left-full ml-2' : 'right-full mr-2'}`} />
 
             <motion.a
-              href="#"
+              href={item.href}
+              target={item.href.startsWith('mailto:') ? undefined : '_blank'}
+              rel={item.href.startsWith('mailto:') ? undefined : 'noreferrer'}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className={`w-48 h-20 ${item.color} rounded-3xl border-4 border-white shadow-xl flex items-center px-4 space-x-4`}

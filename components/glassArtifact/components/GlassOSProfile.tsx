@@ -20,9 +20,15 @@ const INITIAL_WIDGETS: Widget[] = [
 
 interface GlassOSProfileProps {
   forcedViewport?: 'mobile' | 'desktop';
+  profileOverride?: {
+    name?: string;
+    bio?: string;
+    avatar?: string;
+    handle?: string;
+  };
 }
 
-export const GlassOSProfile: React.FC<GlassOSProfileProps> = ({ forcedViewport }) => {
+export const GlassOSProfile: React.FC<GlassOSProfileProps> = ({ forcedViewport, profileOverride }) => {
   const [isCompactByWidth, setIsCompactByWidth] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const isEmbeddedPreview = Boolean(forcedViewport);
@@ -66,6 +72,7 @@ export const GlassOSProfile: React.FC<GlassOSProfileProps> = ({ forcedViewport }
             isActive={activeId === widget.id}
             onActivate={setActiveId}
             compact={isCompact}
+            profileOverride={profileOverride}
           />
         ))}
       </div>
@@ -99,7 +106,8 @@ export const GlassOSProfile: React.FC<GlassOSProfileProps> = ({ forcedViewport }
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             >
               <WidgetExpandedContent 
-                widget={INITIAL_WIDGETS.find(w => w.id === activeId)!} 
+                widget={INITIAL_WIDGETS.find(w => w.id === activeId)!}
+                profileOverride={profileOverride}
                 onClose={() => setActiveId(null)}
               />
             </motion.div>
@@ -111,7 +119,16 @@ export const GlassOSProfile: React.FC<GlassOSProfileProps> = ({ forcedViewport }
 };
 
 // Internal Helper for Expanded View
-const WidgetExpandedContent: React.FC<{ widget: Widget; onClose: () => void }> = ({ widget, onClose }) => {
+const WidgetExpandedContent: React.FC<{
+  widget: Widget;
+  onClose: () => void;
+  profileOverride?: {
+    name?: string;
+    bio?: string;
+    avatar?: string;
+    handle?: string;
+  };
+}> = ({ widget, onClose, profileOverride }) => {
   // Removed incorrect local destructuring from string literals
   
   return (
@@ -127,7 +144,7 @@ const WidgetExpandedContent: React.FC<{ widget: Widget; onClose: () => void }> =
       </div>
       
       <div className="flex-1 overflow-auto">
-        {widget.type === 'profile' && <ProfileWidget isExpanded={true} />}
+        {widget.type === 'profile' && <ProfileWidget isExpanded={true} profileOverride={profileOverride} />}
         {widget.type === 'music' && <MusicWidget isExpanded={true} />}
         {widget.type === 'map' && <MapWidget isExpanded={true} />}
         {widget.type === 'video' && <VideoWidget isExpanded={true} />}

@@ -8,7 +8,7 @@ export const EDITORIAL_LINKS: LinkItem[] = [
     title: 'LOOKBOOK 2025',
     subtitle: 'SPRING SUMMER COLLECTION',
     imageUrl: 'https://images.unsplash.com/photo-1539109132314-34a9c6553876?auto=format&fit=crop&q=80&w=1600',
-    url: '#'
+    url: 'https://www.vibejam.co'
   },
   {
     id: '2',
@@ -16,7 +16,7 @@ export const EDITORIAL_LINKS: LinkItem[] = [
     title: 'THE ARCHIVE',
     subtitle: 'CURATED PIECES 2018-2024',
     imageUrl: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&q=80&w=1600',
-    url: '#'
+    url: 'https://www.vibejam.co/marketplace'
   },
   {
     id: '3',
@@ -24,7 +24,7 @@ export const EDITORIAL_LINKS: LinkItem[] = [
     title: 'NEW CAMPAIGN',
     subtitle: 'SHOT BY MIKEL JANSSEN',
     imageUrl: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&q=80&w=1600',
-    url: '#'
+    url: 'https://www.vibejam.co/canvas'
   },
   {
     id: '4',
@@ -32,7 +32,7 @@ export const EDITORIAL_LINKS: LinkItem[] = [
     title: 'DIGITAL ATELIER',
     subtitle: 'VIRTUAL FIT EXPERIENCES',
     imageUrl: 'https://images.unsplash.com/photo-1445205170230-053b83016050?auto=format&fit=crop&q=80&w=1600',
-    url: '#'
+    url: 'https://www.vibejam.co/apps'
   },
   {
     id: '5',
@@ -40,7 +40,7 @@ export const EDITORIAL_LINKS: LinkItem[] = [
     title: 'CONTACT HOUSE',
     subtitle: 'INQUIRIES & APPOINTMENTS',
     imageUrl: 'https://images.unsplash.com/photo-1485230895905-ec40ba36b9bc?auto=format&fit=crop&q=80&w=1600',
-    url: '#'
+    url: 'mailto:hello@vibejam.co'
   }
 ];
 

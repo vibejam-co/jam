@@ -14,6 +14,8 @@ interface NotificationCenterProps {
   onMarkAllRead: () => void;
   onSelectApp: (appId: string) => void;
   getAppById: (appId: string) => VibeApp | undefined;
+  className?: string;
+  position?: 'absolute' | 'fixed';
 }
 
 type NotificationFilter = 'All' | 'Wishlist' | 'Updates' | 'Offers';
@@ -23,7 +25,9 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
   onClose, 
   onMarkAllRead, 
   onSelectApp,
-  getAppById
+  getAppById,
+  className,
+  position = 'absolute',
 }) => {
   const [activeFilter, setActiveFilter] = useState<NotificationFilter>('All');
 
@@ -51,7 +55,7 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 10, scale: 0.95 }}
       transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-      className="absolute top-16 right-0 w-full sm:w-[420px] bg-[#050505] border border-white/10 rounded-[32px] shadow-[0_30px_100px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col z-[130] origin-top-right"
+      className={`${position === 'fixed' ? 'fixed top-[72px] right-4 sm:right-8' : 'absolute top-16 right-0'} w-full sm:w-[420px] bg-[#050505] border border-white/10 rounded-[32px] shadow-[0_30px_100px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col z-[130] origin-top-right ${className ?? ''}`}
     >
       {/* Header */}
       <header className="px-6 py-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">

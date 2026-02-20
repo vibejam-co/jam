@@ -6,6 +6,12 @@ const BASE_CANVAS_URL = 'https://vibejam.co';
 const META_OWNER_KEY = '__owner_uid';
 const META_TEMPLATE_KEY = '__selected_template_id';
 const META_PUBLISHED_AT_KEY = '__published_at';
+const META_MONETIZATION_KEY = '__monetization';
+const META_LAYOUT_KEY = '__layout_schema';
+const META_LINK_ITEMS_KEY = '__link_items';
+const META_THEME_CONTAINERS_KEY = '__theme_containers';
+const LAYOUT_SCHEMA_VERSION = 1;
+const MAX_LAYOUT_BLOCKS = 24;
 
 const sanitizeSlug = (input: string): string =>
   input
@@ -34,12 +40,413 @@ const sanitizeStringMap = (value: unknown): Record<string, string> => {
 const sanitizeSignals = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((signal): signal is string => typeof signal === 'string') : [];
 
+const sanitizeLinkItems = (value: unknown): Array<{ id: string; title: string; url: string; clicks?: string }> => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  return value
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .map((item, index) => {
+      const title = typeof item.title === 'string' ? item.title.trim() : '';
+      const url = typeof item.url === 'string' ? item.url.trim() : '';
+      if (!title || !url) {
+        return null;
+      }
+      const idRaw = typeof item.id === 'string' && item.id.trim().length > 0
+        ? item.id.trim()
+        : `link-${Date.now()}-${index}`;
+      if (seen.has(idRaw)) {
+        return null;
+      }
+      seen.add(idRaw);
+      const clicks = typeof item.clicks === 'string' && item.clicks.trim().length > 0
+        ? item.clicks.trim()
+        : undefined;
+      return {
+        id: idRaw,
+        title,
+        url,
+        clicks,
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 64) as Array<{ id: string; title: string; url: string; clicks?: string }>;
+};
+
+const sanitizeThemeContainers = (value: unknown) => {
+  if (!isRecord(value)) {
+    return {} as Record<string, Array<{
+      id: string;
+      size: 'full' | 'standard' | 'profile';
+      kind: 'link' | 'image' | 'widget' | 'note';
+      title: string;
+      subtitle?: string;
+      url?: string;
+      mediaUrl?: string;
+    }>>;
+  }
+
+  const normalizeSize = (input: unknown): 'full' | 'standard' | 'profile' =>
+    input === 'full' || input === 'standard' || input === 'profile' ? input : 'standard';
+  const normalizeKind = (input: unknown): 'link' | 'image' | 'widget' | 'note' =>
+    input === 'link' || input === 'image' || input === 'widget' || input === 'note' ? input : 'note';
+
+  const out: Record<string, Array<{
+    id: string;
+    size: 'full' | 'standard' | 'profile';
+    kind: 'link' | 'image' | 'widget' | 'note';
+    title: string;
+    subtitle?: string;
+    url?: string;
+    mediaUrl?: string;
+  }>> = {};
+
+  Object.entries(value).forEach(([themeId, raw]) => {
+    if (!Array.isArray(raw)) {
+      return;
+    }
+    const seen = new Set<string>();
+    const items = raw
+      .filter((item): item is Record<string, unknown> => isRecord(item))
+      .map((item, index) => {
+        const title = typeof item.title === 'string' ? item.title.trim() : '';
+        if (!title) {
+          return null;
+        }
+        const idRaw = typeof item.id === 'string' && item.id.trim().length > 0
+          ? item.id.trim()
+          : `container-${Date.now()}-${index}`;
+        if (seen.has(idRaw)) {
+          return null;
+        }
+        seen.add(idRaw);
+        const subtitle = typeof item.subtitle === 'string' && item.subtitle.trim().length > 0
+          ? item.subtitle.trim()
+          : undefined;
+        const url = typeof item.url === 'string' && item.url.trim().length > 0
+          ? item.url.trim()
+          : undefined;
+        const mediaUrl = typeof item.mediaUrl === 'string' && item.mediaUrl.trim().length > 0
+          ? item.mediaUrl.trim()
+          : undefined;
+        return {
+          id: idRaw,
+          size: normalizeSize(item.size),
+          kind: normalizeKind(item.kind),
+          title,
+          subtitle,
+          url,
+          mediaUrl,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 48) as Array<{
+      id: string;
+      size: 'full' | 'standard' | 'profile';
+      kind: 'link' | 'image' | 'widget' | 'note';
+      title: string;
+      subtitle?: string;
+      url?: string;
+      mediaUrl?: string;
+    }>;
+    if (items.length > 0) {
+      out[themeId] = items;
+    }
+  });
+
+  return out;
+};
+
 const stripCanvasMeta = (links: Record<string, string>): Record<string, string> => {
   const next = { ...links };
   delete next[META_OWNER_KEY];
   delete next[META_TEMPLATE_KEY];
   delete next[META_PUBLISHED_AT_KEY];
+  delete next[META_MONETIZATION_KEY];
+  delete next[META_LAYOUT_KEY];
+  delete next[META_LINK_ITEMS_KEY];
+  delete next[META_THEME_CONTAINERS_KEY];
   return next;
+};
+
+const sanitizeLayout = (value: unknown) => {
+  const blockTypeSet = new Set([
+    'hero',
+    'stats',
+    'links',
+    'products',
+    'music',
+    'socials',
+    'brand_collabs',
+    'featured_link',
+    'text',
+    'image',
+    'embed',
+    'divider',
+  ]);
+  const blockTitleMap: Record<string, string> = {
+    hero: 'Hero',
+    stats: 'Stats',
+    links: 'Link List',
+    products: 'Product Grid',
+    music: 'Music',
+    socials: 'Social Icons',
+    brand_collabs: 'Brand Collabs',
+    featured_link: 'Featured Link',
+    text: 'Text Block',
+    image: 'Image Block',
+    embed: 'Custom Embed',
+    divider: 'Divider',
+  };
+
+  const createDefault = () => ({
+    version: LAYOUT_SCHEMA_VERSION,
+    updatedAt: new Date().toISOString(),
+    blocks: [
+      { id: 'hero-default', type: 'hero', title: 'Hero', position: 0, visible: true, data: {} },
+      { id: 'featured-default', type: 'featured_link', title: 'Featured Link', position: 1, visible: true, data: {} },
+      { id: 'links-default', type: 'links', title: 'Link List', position: 2, visible: true, data: {} },
+      { id: 'socials-default', type: 'socials', title: 'Social Icons', position: 3, visible: true, data: {} },
+      { id: 'stats-default', type: 'stats', title: 'Stats', position: 4, visible: true, data: {} },
+    ],
+  });
+
+  if (!isRecord(value)) {
+    return createDefault();
+  }
+
+  const versionParsed = Number(value.version);
+  const version = Number.isFinite(versionParsed) ? Math.max(1, Math.round(versionParsed)) : LAYOUT_SCHEMA_VERSION;
+  const updatedAt = typeof value.updatedAt === 'string' && value.updatedAt.length > 0 ? value.updatedAt : new Date().toISOString();
+  const rawBlocks = Array.isArray(value.blocks) ? value.blocks : [];
+  const seenIds = new Set<string>();
+  const blocks = rawBlocks
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .map((item, index) => {
+      const typeRaw = typeof item.type === 'string' ? item.type : 'links';
+      if (!blockTypeSet.has(typeRaw)) {
+        return null;
+      }
+      const id = typeof item.id === 'string' && item.id.length > 0 ? item.id : `${typeRaw}-${Date.now()}-${index}`;
+      if (seenIds.has(id)) {
+        return null;
+      }
+      seenIds.add(id);
+      const title = typeof item.title === 'string' && item.title.trim().length > 0 ? item.title.trim() : (blockTitleMap[typeRaw] || 'Block');
+      const visible = Boolean(item.visible ?? true);
+      const data = isRecord(item.data) ? item.data : {};
+      return {
+        id,
+        type: typeRaw,
+        title,
+        position: index,
+        visible,
+        data,
+      };
+    })
+    .filter((item): item is { id: string; type: string; title: string; position: number; visible: boolean; data: Record<string, unknown> } => Boolean(item))
+    .slice(0, MAX_LAYOUT_BLOCKS);
+
+  if (blocks.length === 0) {
+    return createDefault();
+  }
+
+  if (!blocks.some((item) => item.type === 'links') && blocks.length < MAX_LAYOUT_BLOCKS) {
+    blocks.push({
+      id: `links-${Date.now()}`,
+      type: 'links',
+      title: 'Link List',
+      position: blocks.length,
+      visible: true,
+      data: {},
+    });
+  }
+
+  return {
+    version,
+    updatedAt,
+    blocks: blocks.map((item, index) => ({ ...item, position: index })),
+  };
+};
+
+const sanitizeMonetization = (value: unknown) => {
+  const sanitizeBrandCollabs = (input: unknown) => {
+    if (!isRecord(input)) {
+      return {
+        enabled: false,
+        contactEmail: '',
+        rateCardUrl: '',
+        minBudgetUsd: 500,
+        inbox: [] as Array<{
+          id: string;
+          brand: string;
+          campaign: string;
+          contactEmail: string;
+          budgetUsd: number;
+          timeline: string;
+          deliverables: string;
+          notes?: string;
+          status: 'new' | 'reviewing' | 'accepted' | 'declined';
+          submittedAt: string;
+        }>,
+      };
+    }
+
+    const rawInbox = Array.isArray(input.inbox) ? input.inbox : [];
+    const inbox = rawInbox
+      .filter((item): item is Record<string, unknown> => isRecord(item))
+      .map((item, index) => {
+        const id = typeof item.id === 'string' && item.id.length > 0 ? item.id : `${Date.now()}-deal-${index}`;
+        const brand = typeof item.brand === 'string' ? item.brand.trim() : '';
+        const campaign = typeof item.campaign === 'string' ? item.campaign.trim() : '';
+        const contactEmail = typeof item.contactEmail === 'string' ? item.contactEmail.trim() : '';
+        const budgetParsed = Number(item.budgetUsd);
+        const budgetUsd = Number.isFinite(budgetParsed) ? Math.max(0, Math.round(budgetParsed * 100) / 100) : 0;
+        const timeline = typeof item.timeline === 'string' ? item.timeline.trim() : '';
+        const deliverables = typeof item.deliverables === 'string' ? item.deliverables.trim() : '';
+        const notes = typeof item.notes === 'string' ? item.notes.trim() : '';
+        const statusRaw = typeof item.status === 'string' ? item.status : 'new';
+        const status = (['new', 'reviewing', 'accepted', 'declined'] as const).includes(statusRaw as any)
+          ? (statusRaw as 'new' | 'reviewing' | 'accepted' | 'declined')
+          : 'new';
+        const submittedAt = typeof item.submittedAt === 'string' && item.submittedAt.length > 0
+          ? item.submittedAt
+          : new Date().toISOString();
+
+        return {
+          id,
+          brand,
+          campaign,
+          contactEmail,
+          budgetUsd,
+          timeline,
+          deliverables,
+          notes: notes || undefined,
+          status,
+          submittedAt,
+        };
+      })
+      .filter((item) => item.brand.length > 0 && item.campaign.length > 0 && item.contactEmail.length > 0);
+
+    const minBudgetParsed = Number(input.minBudgetUsd);
+    return {
+      enabled: Boolean(input.enabled),
+      contactEmail: typeof input.contactEmail === 'string' ? input.contactEmail.trim() : '',
+      rateCardUrl: typeof input.rateCardUrl === 'string' ? input.rateCardUrl.trim() : '',
+      minBudgetUsd: Number.isFinite(minBudgetParsed) ? Math.max(0, Math.round(minBudgetParsed)) : 500,
+      inbox,
+    };
+  };
+
+  if (!isRecord(value)) {
+    return {
+      tipJarEnabled: false,
+      tipJarUrl: '',
+      products: [] as Array<{
+        id: string;
+        title: string;
+        description?: string;
+        category: 'files' | 'presets' | 'code' | 'digital';
+        priceUsd: number;
+        url: string;
+      }>,
+      brandCollabs: sanitizeBrandCollabs(null),
+    };
+  }
+
+  const rawProducts = Array.isArray(value.products) ? value.products : [];
+  const products = rawProducts
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .map((item, index) => {
+      const id = typeof item.id === 'string' && item.id.length > 0 ? item.id : `${Date.now()}-${index}`;
+      const title = typeof item.title === 'string' ? item.title.trim() : '';
+      const description = typeof item.description === 'string' ? item.description.trim() : '';
+      const categoryRaw = typeof item.category === 'string' ? item.category : 'digital';
+      const category = (['files', 'presets', 'code', 'digital'] as const).includes(categoryRaw as any)
+        ? (categoryRaw as 'files' | 'presets' | 'code' | 'digital')
+        : 'digital';
+      const priceParsed = Number(item.priceUsd);
+      const priceUsd = Number.isFinite(priceParsed) ? Math.max(0, Math.round(priceParsed * 100) / 100) : 0;
+      const url = typeof item.url === 'string' ? item.url.trim() : '';
+
+      return { id, title, description, category, priceUsd, url };
+    })
+    .filter((item) => item.title.length > 0 && item.url.length > 0);
+
+  return {
+    tipJarEnabled: Boolean(value.tipJarEnabled),
+    tipJarUrl: typeof value.tipJarUrl === 'string' ? value.tipJarUrl.trim() : '',
+    products,
+    brandCollabs: sanitizeBrandCollabs(value.brandCollabs),
+  };
+};
+
+const getCanvasMonetization = (row: any) => {
+  if (!isRecord(row?.links)) {
+    return sanitizeMonetization(null);
+  }
+
+  const raw = row.links[META_MONETIZATION_KEY];
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return sanitizeMonetization(null);
+  }
+
+  try {
+    return sanitizeMonetization(JSON.parse(raw));
+  } catch {
+    return sanitizeMonetization(null);
+  }
+};
+
+const getCanvasLayout = (row: any) => {
+  if (!isRecord(row?.links)) {
+    return sanitizeLayout(null);
+  }
+
+  const raw = row.links[META_LAYOUT_KEY];
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return sanitizeLayout(null);
+  }
+
+  try {
+    return sanitizeLayout(JSON.parse(raw));
+  } catch {
+    return sanitizeLayout(null);
+  }
+};
+
+const getCanvasLinkItems = (row: any) => {
+  if (!isRecord(row?.links)) {
+    return [];
+  }
+
+  const raw = row.links[META_LINK_ITEMS_KEY];
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return [];
+  }
+
+  try {
+    return sanitizeLinkItems(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+};
+
+const getCanvasThemeContainers = (row: any) => {
+  if (!isRecord(row?.links)) {
+    return sanitizeThemeContainers(null);
+  }
+  const raw = row.links[META_THEME_CONTAINERS_KEY];
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return sanitizeThemeContainers(null);
+  }
+  try {
+    return sanitizeThemeContainers(JSON.parse(raw));
+  } catch {
+    return sanitizeThemeContainers(null);
+  }
 };
 
 const getCanvasOwnerId = (linksValue: unknown): string | null => {
@@ -117,6 +524,10 @@ const toCanvasSession = (row: any) => {
       selectedTemplateId: getCanvasTemplateId(row),
       selectedSignals: sanitizeSignals(row?.selected_signals),
       links: cleanLinks,
+      linkItems: getCanvasLinkItems(row),
+      themeContainers: getCanvasThemeContainers(row),
+      monetization: getCanvasMonetization(row),
+      layout: getCanvasLayout(row),
     },
     publish: {
       success: true,
@@ -297,11 +708,19 @@ export default async function handler(req: any, res: any) {
         : null;
     const selectedSignals = sanitizeSignals(body?.selectedSignals);
     const cleanLinks = stripCanvasMeta(sanitizeStringMap(body?.links));
+    const linkItems = sanitizeLinkItems(body?.linkItems);
+    const themeContainers = sanitizeThemeContainers(body?.themeContainers);
+    const monetization = sanitizeMonetization(body?.monetization);
+    const layout = sanitizeLayout(body?.layout);
     const publishedAt = new Date().toISOString();
     const persistedLinks = {
       ...cleanLinks,
       [META_OWNER_KEY]: user.id,
       [META_PUBLISHED_AT_KEY]: publishedAt,
+      [META_MONETIZATION_KEY]: JSON.stringify(monetization),
+      [META_LAYOUT_KEY]: JSON.stringify(layout),
+      [META_LINK_ITEMS_KEY]: JSON.stringify(linkItems),
+      [META_THEME_CONTAINERS_KEY]: JSON.stringify(themeContainers),
       ...(selectedTemplateId ? { [META_TEMPLATE_KEY]: selectedTemplateId } : {}),
     };
 

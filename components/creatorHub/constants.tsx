@@ -21,9 +21,9 @@ export const CREATOR: Creator = {
   avatar: "https://picsum.photos/id/64/400/400",
   description: "Digital artisan building tools for mindful creators. Shipping weekly from a sunny studio in Barcelona.",
   socials: [
-    { platform: "Twitter", url: "#", icon: "twitter" },
-    { platform: "Instagram", url: "#", icon: "instagram" },
-    { platform: "Github", url: "#", icon: "github" },
+    { platform: "Twitter", url: "https://x.com", icon: "twitter" },
+    { platform: "Instagram", url: "https://www.instagram.com", icon: "instagram" },
+    { platform: "Github", url: "https://github.com", icon: "github" },
   ]
 };
 
@@ -40,19 +40,19 @@ export const CTA_CARDS: CTALink[] = [
   { 
     title: "Visit Website", 
     icon: <Globe size={24} />, 
-    url: "#", 
+    url: "https://www.vibejam.co", 
     color: "bg-[#F2CC8F]/20" 
   },
   { 
     title: "Join Newsletter", 
     icon: <Mail size={24} />, 
-    url: "#", 
+    url: "mailto:newsletter@vibejam.co", 
     color: "bg-[#E07A5F]/15" 
   },
   { 
     title: "Community", 
     icon: <Users size={24} />, 
-    url: "#", 
+    url: "https://discord.com", 
     color: "bg-[#81B29A]/20" 
   },
 ];

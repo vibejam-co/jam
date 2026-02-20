@@ -14,4 +14,10 @@ export interface WidgetCardProps {
   isActive: boolean;
   onActivate: (id: string | null) => void;
   compact?: boolean;
+  profileOverride?: {
+    name?: string;
+    bio?: string;
+    avatar?: string;
+    handle?: string;
+  };
 }

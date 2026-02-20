@@ -85,7 +85,7 @@ export const JamPage: React.FC<JamPageProps> = ({ compact = false }) => {
           </div>
           
           <div className="pt-12">
-             <a href="#" className="inline-flex items-center group">
+             <a href="mailto:hello@vibejam.co" className="inline-flex items-center group">
                <span className="font-mono text-[10px] uppercase tracking-[0.2em] group-hover:mr-4 transition-all duration-300">Initiate Contact</span>
                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="ml-2 group-hover:translate-x-2 transition-transform">
                  <path d="M5 12h14m-7-7l7 7-7 7" />

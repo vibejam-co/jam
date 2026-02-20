@@ -72,6 +72,94 @@ export interface CanvasProfileInput {
   avatar: string;
 }
 
+export interface CanvasDigitalProduct {
+  id: string;
+  title: string;
+  description?: string;
+  category: 'files' | 'presets' | 'code' | 'digital';
+  priceUsd: number;
+  url: string;
+}
+
+export type CanvasBrandCollabDealStatus = 'new' | 'reviewing' | 'accepted' | 'declined';
+
+export interface CanvasBrandCollabDeal {
+  id: string;
+  brand: string;
+  campaign: string;
+  contactEmail: string;
+  budgetUsd: number;
+  timeline: string;
+  deliverables: string;
+  notes?: string;
+  status: CanvasBrandCollabDealStatus;
+  submittedAt: string;
+}
+
+export interface CanvasBrandCollabs {
+  enabled: boolean;
+  contactEmail: string;
+  rateCardUrl?: string;
+  minBudgetUsd?: number;
+  inbox: CanvasBrandCollabDeal[];
+}
+
+export type CanvasLayoutBlockType =
+  | 'hero'
+  | 'stats'
+  | 'links'
+  | 'products'
+  | 'music'
+  | 'socials'
+  | 'brand_collabs'
+  | 'featured_link'
+  | 'text'
+  | 'image'
+  | 'embed'
+  | 'divider';
+
+export interface CanvasLayoutBlock {
+  id: string;
+  type: CanvasLayoutBlockType;
+  title: string;
+  position: number;
+  visible: boolean;
+  data?: Record<string, string | number | boolean | null>;
+}
+
+export interface CanvasLayoutSchema {
+  version: number;
+  updatedAt: string;
+  blocks: CanvasLayoutBlock[];
+}
+
+export interface CanvasMonetization {
+  tipJarEnabled: boolean;
+  tipJarUrl?: string;
+  products: CanvasDigitalProduct[];
+  brandCollabs?: CanvasBrandCollabs;
+}
+
+export interface CanvasLinkItem {
+  id: string;
+  title: string;
+  url: string;
+  clicks?: string;
+}
+
+export type CanvasThemeContainerSize = 'full' | 'standard' | 'profile';
+export type CanvasThemeContainerKind = 'link' | 'image' | 'widget' | 'note';
+
+export interface CanvasThemeContainer {
+  id: string;
+  size: CanvasThemeContainerSize;
+  kind: CanvasThemeContainerKind;
+  title: string;
+  subtitle?: string;
+  url?: string;
+  mediaUrl?: string;
+}
+
 export interface CanvasOnboardingPayload {
   claimedName: string;
   vanitySlug?: string;
@@ -80,6 +168,10 @@ export interface CanvasOnboardingPayload {
   selectedTemplateId?: string;
   selectedSignals: string[];
   links: Record<string, string>;
+  linkItems?: CanvasLinkItem[];
+  themeContainers?: Record<string, CanvasThemeContainer[]>;
+  monetization?: CanvasMonetization;
+  layout?: CanvasLayoutSchema;
 }
 
 export interface CanvasTheme {

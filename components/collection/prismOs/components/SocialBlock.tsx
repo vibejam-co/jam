@@ -4,9 +4,9 @@ import { motion } from 'framer-motion';
 
 export const SocialBlock: React.FC = () => {
   const socials = [
-    { label: 'Twitter', handle: '@AlexDRV', color: 'hover:text-cyan-400' },
-    { label: 'GitHub', handle: 'alex-prism', color: 'hover:text-purple-400' },
-    { label: 'Behance', handle: 'alex_designs', color: 'hover:text-pink-400' },
+    { label: 'Twitter', handle: '@AlexDRV', href: 'https://x.com/alexdrv', color: 'hover:text-cyan-400' },
+    { label: 'GitHub', handle: 'alex-prism', href: 'https://github.com/alex-prism', color: 'hover:text-purple-400' },
+    { label: 'Behance', handle: 'alex_designs', href: 'https://www.behance.net/alex_designs', color: 'hover:text-pink-400' },
   ];
 
   return (
@@ -14,7 +14,9 @@ export const SocialBlock: React.FC = () => {
       {socials.map((s, idx) => (
         <motion.a
           key={idx}
-          href="#"
+          href={s.href}
+          target="_blank"
+          rel="noreferrer"
           whileHover={{ y: -5 }}
           className={`flex flex-col items-center gap-2 group/link transition-colors ${s.color}`}
         >

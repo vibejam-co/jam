@@ -110,7 +110,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[140] bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
+      className="fixed inset-0 z-[420] bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
     >
       <div className="absolute inset-0" onClick={onClose} />
 
