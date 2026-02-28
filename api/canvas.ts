@@ -1,6 +1,6 @@
-import { CANVAS_TEMPLATES, CANVAS_THEMES, featuredFrameworks } from './_lib/canvas-catalog.js';
-import { getMethod, methodNotAllowed, parseJsonBody, sendJson } from './_lib/http.js';
-import { getSupabaseAdmin } from './_lib/supabase-admin.js';
+import { CANVAS_TEMPLATES, CANVAS_THEMES, featuredFrameworks } from '../lib/server/canvas-catalog.js';
+import { getMethod, methodNotAllowed, parseJsonBody, sendJson } from '../lib/server/http.js';
+import { getSupabaseAdmin } from '../lib/server/supabase-admin.js';
 
 const BASE_CANVAS_URL = 'https://vibejam.co';
 const META_OWNER_KEY = '__owner_uid';

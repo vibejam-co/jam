@@ -1,33 +1,72 @@
-const sendJson = (res: any, status: number, body: unknown) => {
-  const payload = JSON.stringify(body);
+import { getMethod, methodNotAllowed, sendJson } from '../lib/server/http.js';
+import { getSupabaseAdmin } from '../lib/server/supabase-admin.js';
+import { getAuthenticatedUser } from '../lib/server/auth.js';
+import { isRecoverableSchemaError, sanitizeErrorDetails } from '../lib/server/marketplace-utils.js';
 
-  if (res && typeof res.setHeader === 'function' && typeof res.end === 'function') {
-    res.statusCode = status;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(payload);
-    return;
-  }
-
-  return new Response(payload, {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-};
-
-const getMethod = (req: any): string => (req && typeof req.method === 'string' ? req.method : '');
+const NOTIFICATION_SELECT = [
+  'id',
+  'title',
+  'message',
+  'type',
+  'timestamp_label',
+  'is_read',
+  'jam_id',
+  'metadata',
+  'created_at',
+].join(',');
 
 export default async function handler(req: any, res: any) {
   try {
     if (getMethod(req) !== 'GET') {
-      return sendJson(res, 405, { error: 'Method Not Allowed' });
+      return methodNotAllowed(res, ['GET']);
     }
 
-    // Reliability fallback endpoint.
-    return sendJson(res, 200, { data: [] });
-  } catch (error: any) {
+    const user = await getAuthenticatedUser(req);
+    const supabase = await getSupabaseAdmin();
+
+    let query = supabase
+      .from('notifications')
+      .select(NOTIFICATION_SELECT)
+      .order('created_at', { ascending: false })
+      .limit(40);
+
+    if (user?.id) {
+      query = query.or(`recipient_user_id.is.null,recipient_user_id.eq.${user.id}`);
+    } else {
+      query = query.is('recipient_user_id', null);
+    }
+
+    let { data, error } = await query;
+    if (error && isRecoverableSchemaError(error)) {
+      const legacyResult = await supabase
+        .from('notifications')
+        .select('id,title,message,type,timestamp_label,is_read,jam_id,created_at')
+        .order('created_at', { ascending: false })
+        .limit(40);
+
+      data = legacyResult.data;
+      error = legacyResult.error;
+    }
+    if (error) {
+      throw error;
+    }
+
+    const notifications = (Array.isArray(data) ? data : []).map((row: any) => ({
+      id: row.id,
+      title: row.title,
+      message: row.message,
+      type: row.type,
+      timestamp: row.timestamp_label,
+      isRead: Boolean(row.is_read),
+      appId: row.jam_id ?? undefined,
+      link: row?.metadata?.asset_id ? `/marketplace/${row.metadata.asset_id}` : undefined,
+    }));
+
+    return sendJson(res, 200, { data: notifications });
+  } catch (error) {
     return sendJson(res, 500, {
       error: 'Failed to load notifications.',
-      details: error?.message ?? 'Unknown error',
+      details: sanitizeErrorDetails(error),
     });
   }
 }

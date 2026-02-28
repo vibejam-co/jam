@@ -64,6 +64,11 @@ const FeedRow: React.FC<FeedRowProps> = ({ app, index, onClick, onToggleWishlist
                 {tag.toUpperCase()}
               </span>
             ))}
+            {app.isForSale && (
+              <span className="px-1.5 py-0.5 rounded-sm border border-[#D4AF37]/30 bg-[#D4AF37]/10 text-[9px] text-[#D4AF37] font-black tracking-widest">
+                FOR SALE
+              </span>
+            )}
           </div>
         </div>
       </div>

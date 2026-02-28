@@ -1,9 +1,9 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Bell, Plus, ChevronDown, LayoutGrid, Globe, Zap, Heart } from 'lucide-react';
+import { Search, Bell, Plus, ChevronDown, LayoutGrid, Globe, Zap, Heart, MessageSquare } from 'lucide-react';
 import { APPS as INITIAL_APPS, NOTIFICATIONS as INITIAL_NOTIFICATIONS } from './constants';
-import { VibeApp, Notification } from './types';
+import { VibeApp, Notification, InboxConversationSummary } from './types';
 import FeedRow from './components/FeedRow';
 import MarketRail from './components/MarketRail';
 import JamDetailView from './components/JamDetailView';
@@ -14,11 +14,22 @@ import ListAppModal from './components/ListAppModal';
 import ProfileView from './components/ProfileView';
 import AuthModal from './components/AuthModal';
 import NotificationCenter from './components/NotificationCenter';
+import InboxQuickCenter from './components/InboxQuickCenter';
 import NewsletterSection from './components/NewsletterSection';
 import Footer from './components/Footer';
 import LegalModal from './components/LegalModal';
 import CanvasPublicPage from './components/CanvasPublicPage';
-import { fetchApps, fetchNotifications, publishApp } from './lib/api';
+import {
+  addWishlistItem,
+  createMarketplaceAssetDraft,
+  fetchApps,
+  fetchInboxConversations,
+  fetchNotifications,
+  fetchProfileMarketplaceSummary,
+  publishMarketplaceAsset,
+  publishApp,
+  removeWishlistItem,
+} from './lib/api';
 import { supabase } from './lib/supabase-client';
 import type { User } from '@supabase/supabase-js';
 
@@ -66,12 +77,18 @@ const App: React.FC = () => {
   const [isStartJamOpen, setIsStartJamOpen] = useState(false);
   const [isListAppOpen, setIsListAppOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profileFocusConversationId, setProfileFocusConversationId] = useState<string | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isInboxQuickOpen, setIsInboxQuickOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [profileInboxBadgeCount, setProfileInboxBadgeCount] = useState(0);
+  const [quickInboxThreads, setQuickInboxThreads] = useState<InboxConversationSummary[]>([]);
+  const [quickInboxLoading, setQuickInboxLoading] = useState(false);
+  const [quickInboxError, setQuickInboxError] = useState<string | null>(null);
   
   // Legal & Support State
   const [legalModalTab, setLegalModalTab] = useState<'Terms' | 'Privacy' | 'Support' | null>(null);
@@ -141,6 +158,128 @@ const App: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!authUser) {
+      setProfileInboxBadgeCount(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshInboxBadge = async () => {
+      try {
+        const response = await fetchProfileMarketplaceSummary();
+        const unread = Number(response?.stats?.unreadInboxCount ?? 0);
+        if (!cancelled) {
+          setProfileInboxBadgeCount(Math.max(0, unread));
+        }
+      } catch {
+        if (!cancelled) {
+          setProfileInboxBadgeCount(0);
+        }
+      }
+    };
+
+    void refreshInboxBadge();
+    const interval = window.setInterval(() => {
+      void refreshInboxBadge();
+    }, 15000);
+
+    const handleRefresh = () => {
+      void refreshInboxBadge();
+    };
+
+    window.addEventListener('profile:refresh-marketplace', handleRefresh as EventListener);
+    window.addEventListener('marketplace:refresh', handleRefresh as EventListener);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('profile:refresh-marketplace', handleRefresh as EventListener);
+      window.removeEventListener('marketplace:refresh', handleRefresh as EventListener);
+    };
+  }, [authUser]);
+
+  useEffect(() => {
+    if (!authUser) {
+      setQuickInboxThreads([]);
+      setQuickInboxLoading(false);
+      setQuickInboxError(null);
+      setIsInboxQuickOpen(false);
+      setIsNotificationsOpen(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshQuickInbox = async (options?: { silent?: boolean }) => {
+      if (!options?.silent) {
+        setQuickInboxLoading(true);
+      }
+      try {
+        const response = await fetchInboxConversations();
+        if (cancelled) {
+          return;
+        }
+        setQuickInboxThreads(Array.isArray(response.items) ? response.items : []);
+        setQuickInboxError(null);
+      } catch (error) {
+        if (!cancelled) {
+          setQuickInboxError(error instanceof Error ? error.message : 'Failed to load inbox.');
+        }
+      } finally {
+        if (!cancelled && !options?.silent) {
+          setQuickInboxLoading(false);
+        }
+      }
+    };
+
+    void refreshQuickInbox();
+
+    const interval = window.setInterval(() => {
+      void refreshQuickInbox({ silent: true });
+    }, 15000);
+
+    const handleRefresh = () => {
+      void refreshQuickInbox({ silent: true });
+    };
+
+    window.addEventListener('profile:refresh-marketplace', handleRefresh as EventListener);
+    window.addEventListener('marketplace:refresh', handleRefresh as EventListener);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('profile:refresh-marketplace', handleRefresh as EventListener);
+      window.removeEventListener('marketplace:refresh', handleRefresh as EventListener);
+    };
+  }, [authUser]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleProfileFocusConversation = (event: Event) => {
+      const custom = event as CustomEvent<{ conversationId?: string }>;
+      const nextConversationId = custom.detail?.conversationId ?? null;
+
+      if (!authUser) {
+        setIsAuthOpen(true);
+        return;
+      }
+
+      setIsProfileOpen(true);
+      setActiveTab('Marketplace');
+      setProfileFocusConversationId(nextConversationId);
+    };
+
+    window.addEventListener('profile:focus-conversation', handleProfileFocusConversation as EventListener);
+    return () => {
+      window.removeEventListener('profile:focus-conversation', handleProfileFocusConversation as EventListener);
+    };
+  }, [authUser]);
+
   const filteredApps = apps.filter(app => {
     if (filter === 'All') return true;
     // Marketplace filter shows apps that are for sale
@@ -160,6 +299,32 @@ const App: React.FC = () => {
     (authUser?.user_metadata?.name as string | undefined) ||
     (authEmail ? authEmail.split('@')[0] : 'Guest');
   const handle = authEmail ? `@${authEmail.split('@')[0]}` : '@guest';
+  const myProfileJams = useMemo(() => {
+    if (!authUser) {
+      return [] as VibeApp[];
+    }
+
+    const email = authEmail.trim().toLowerCase();
+    const normalizedHandle = handle.trim().toLowerCase();
+    const matched = apps.filter((app) => {
+      const founderEmail = String(app?.founder?.email ?? '').trim().toLowerCase();
+      const founderHandle = String(app?.founder?.handle ?? '').trim().toLowerCase();
+      return Boolean(
+        (email && founderEmail && founderEmail === email)
+        || (normalizedHandle && founderHandle && founderHandle === normalizedHandle),
+      );
+    });
+
+    const seen = new Set<string>();
+    return matched.filter((app) => {
+      const key = String(app.id || `${app.name}-${app.founder?.handle || ''}`).trim();
+      if (!key || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }, [apps, authEmail, authUser, handle]);
 
   const handlePublishJam = async (newApp: VibeApp) => {
     if (isPublishing) {
@@ -167,28 +332,123 @@ const App: React.FC = () => {
     }
 
     setIsPublishing(true);
+    setLoadError(null);
+
+    const upsertLocalApp = (incoming: VibeApp) => {
+      setApps((prev) => {
+        const withoutExisting = prev.filter((item) => item.id !== incoming.id);
+        const next = [incoming, ...withoutExisting];
+        return next.map((item, index) => ({
+          ...item,
+          rank: String(index + 1).padStart(2, '0'),
+          rankValue: index + 1,
+        }));
+      });
+    };
+
+    let publishedApp = newApp;
 
     try {
       const publishedApps = await publishApp(newApp);
       if (publishedApps.length > 0) {
         setApps(publishedApps);
+        const matched = publishedApps.find((item) => item.id === newApp.id || item.name === newApp.name);
+        if (matched) {
+          publishedApp = { ...newApp, ...matched };
+        }
+      } else {
+        upsertLocalApp(newApp);
       }
-      setLoadError(null);
     } catch (error) {
       // Fallback to local state to avoid a dead-end UX when backend is unavailable.
-      setApps((prev) => {
-        const nextRank = (prev.length + 1).toString().padStart(2, '0');
-        const appWithRank = { ...newApp, rank: nextRank };
-        return [appWithRank, ...prev];
-      });
+      upsertLocalApp(newApp);
       setLoadError(error instanceof Error ? error.message : 'Publish failed on backend; saved locally only.');
-    } finally {
-      setIsPublishing(false);
     }
+
+    const shouldPublishToMarketplace =
+      publishedApp.publishSource === 'start-jam'
+      && Boolean(publishedApp.publishToMarketplace)
+      && !publishedApp.marketplaceAssetId;
+
+    if (shouldPublishToMarketplace) {
+      const founderEmail = publishedApp.founder.email ?? authEmail;
+      const askingPriceUsd =
+        publishedApp.marketplaceAskingPriceUsd
+        || publishedApp.askingPrice?.replace(/[^0-9.]/g, '')
+        || String(Math.max(5000, Math.round((publishedApp.monthlyRevenue || 0) * 48)));
+
+      if (!authUser) {
+        setLoadError('Jam published to Rankings. Sign in to publish this jam to Marketplace.');
+      } else if (!founderEmail) {
+        setLoadError('Jam published to Rankings. Founder email is required for Marketplace listing.');
+      } else {
+        try {
+          const draftResponse = await createMarketplaceAssetDraft({
+            name: publishedApp.name,
+            tagline: publishedApp.pitch || `${publishedApp.name} is now open for acquisition.`,
+            description: publishedApp.solution || publishedApp.pitch || `${publishedApp.name} is now open for acquisition.`,
+            category: publishedApp.category,
+            founderName: publishedApp.founder.name,
+            founderEmail,
+            isAnonymous: Boolean(publishedApp.isAnonymous),
+            visibility: publishedApp.marketplaceVisibility ?? 'public',
+            techStack: publishedApp.techStack ?? [],
+            jamId: publishedApp.id,
+          });
+
+          const draftAsset = draftResponse.asset as { id: string } | undefined;
+          if (!draftAsset?.id) {
+            throw new Error('Marketplace draft was created without an asset id.');
+          }
+
+          const publishResponse = await publishMarketplaceAsset(draftAsset.id, {
+            askingPriceUsd,
+            profitMarginPercent: publishedApp.profitMargin ?? null,
+            tier: publishedApp.marketplaceBoostTierId ?? 'free',
+            visibility: publishedApp.marketplaceVisibility ?? 'public',
+          });
+
+          if ('requiresPayment' in publishResponse && publishResponse.requiresPayment) {
+            throw new Error('Boost payment is required before this marketplace listing can go live.');
+          }
+
+          const enrichedApp: VibeApp = {
+            ...publishedApp,
+            isForSale: true,
+            marketplaceAssetId: publishResponse.assetId,
+            askingPrice: `$${askingPriceUsd}`,
+            marketplaceVerifiedStatus: publishResponse.verifiedStatus,
+            valuationMultipleX100: publishResponse.valuationMultipleX100 ?? null,
+            boostTier: 'Free',
+            isOwnerListing: true,
+          };
+
+          publishedApp = enrichedApp;
+          upsertLocalApp(enrichedApp);
+
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('marketplace:refresh'));
+            window.dispatchEvent(new CustomEvent('marketplace:listing-published'));
+            window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
+          }
+        } catch (error) {
+          setLoadError(
+            error instanceof Error
+              ? `Jam published to Rankings. Marketplace publish skipped: ${error.message}`
+              : 'Jam published to Rankings. Marketplace publish skipped due to an unknown error.',
+          );
+        }
+      }
+    }
+
+    setIsPublishing(false);
 
     setIsStartJamOpen(false);
     setIsListAppOpen(false);
-    if (newApp.isForSale) {
+
+    if (publishedApp.publishSource === 'start-jam') {
+      setActiveTab('Rankings');
+    } else if (publishedApp.isForSale) {
       setActiveTab('Marketplace');
     } else {
       setActiveTab('Rankings');
@@ -196,11 +456,26 @@ const App: React.FC = () => {
   };
 
   const handleToggleWishlist = (app: VibeApp) => {
+    const wasInWishlist = wishlist.some((item) => item.id === app.id);
     setWishlist(prev => 
       prev.find(a => a.id === app.id) 
         ? prev.filter(a => a.id !== app.id) 
         : [...prev, app]
     );
+
+    if (authUser && app.marketplaceAssetId) {
+      const listingId = app.marketplaceAssetId;
+      const request = wasInWishlist ? removeWishlistItem(listingId) : addWishlistItem(listingId);
+      void request
+        .then(() => {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
+          }
+        })
+        .catch((error) => {
+          setLoadError(error instanceof Error ? error.message : 'Unable to sync wishlist right now.');
+        });
+    }
   };
 
   const isAppInWishlist = (appId: string) => wishlist.some(a => a.id === appId);
@@ -228,6 +503,22 @@ const App: React.FC = () => {
     }
     setIsSigningOut(false);
     setIsProfileOpen(false);
+  };
+
+  const openInboxConversationFromQuickPanel = (conversationId: string) => {
+    setIsInboxQuickOpen(false);
+    setIsNotificationsOpen(false);
+    setIsProfileOpen(true);
+    setActiveTab('Marketplace');
+    setProfileFocusConversationId(conversationId);
+  };
+
+  const openFullInboxFromQuickPanel = () => {
+    setIsInboxQuickOpen(false);
+    setIsNotificationsOpen(false);
+    setIsProfileOpen(true);
+    setActiveTab('Marketplace');
+    setProfileFocusConversationId(quickInboxThreads[0]?.id ?? null);
   };
 
   if (publicSlug) {
@@ -278,28 +569,84 @@ const App: React.FC = () => {
                 Sign In
               </button>
             )}
-            <div className="flex items-center gap-3 relative">
-              <button onClick={() => setIsNotificationsOpen(!isNotificationsOpen)} className="relative p-1 transition-transform hover:scale-110 active:scale-95">
-                <Bell className={`w-5 h-5 transition-colors ${isNotificationsOpen ? 'text-white' : 'text-zinc-400'}`} />
-                {unreadCount > 0 && <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-cyan-400 border-2 border-black" />}
-              </button>
-              <AnimatePresence>
-                {isNotificationsOpen && (
-                  <>
-                    <div className="fixed inset-0 z-[125]" onClick={() => setIsNotificationsOpen(false)} />
-                    <NotificationCenter notifications={notifications} onClose={() => setIsNotificationsOpen(false)} onMarkAllRead={markAllRead} getAppById={getAppById} onSelectApp={(id) => {
-                      const app = getAppById(id);
-                      if (app) { setSelectedApp(app); setIsNotificationsOpen(false); }
-                    }} />
-                  </>
-                )}
-              </AnimatePresence>
-              {authUser && (
-                <div onClick={handleProfileClick} className="w-8 h-8 rounded-full bg-zinc-800 border border-white/10 overflow-hidden cursor-pointer hover:border-white/30 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.05)]">
-                  <img src={avatarUrl} alt={`${displayName} avatar`} className="w-full h-full object-cover" />
-                </div>
-              )}
-            </div>
+            {authUser && (
+              <div className="flex items-center gap-3 relative">
+                <button
+                  onClick={() => {
+                    setIsInboxQuickOpen((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setIsNotificationsOpen(false);
+                      }
+                      return next;
+                    });
+                  }}
+                  className="relative p-1 transition-transform hover:scale-110 active:scale-95"
+                  aria-label="Open inbox quick view"
+                >
+                  <MessageSquare className={`w-5 h-5 transition-colors ${isInboxQuickOpen ? 'text-white' : 'text-zinc-400'}`} />
+                  {profileInboxBadgeCount > 0 && <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-cyan-400 border-2 border-black" />}
+                </button>
+                <button
+                  onClick={() => {
+                    setIsNotificationsOpen((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setIsInboxQuickOpen(false);
+                      }
+                      return next;
+                    });
+                  }}
+                  className="relative p-1 transition-transform hover:scale-110 active:scale-95"
+                  aria-label="Open notifications"
+                >
+                  <Bell className={`w-5 h-5 transition-colors ${isNotificationsOpen ? 'text-white' : 'text-zinc-400'}`} />
+                  {unreadCount > 0 && <span className="absolute top-0 right-0 w-2 h-2 rounded-full bg-cyan-400 border-2 border-black" />}
+                </button>
+                <AnimatePresence>
+                  {isInboxQuickOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[125]" onClick={() => setIsInboxQuickOpen(false)} />
+                      <InboxQuickCenter
+                        items={quickInboxThreads}
+                        unreadCount={profileInboxBadgeCount}
+                        isLoading={quickInboxLoading}
+                        error={quickInboxError}
+                        onClose={() => setIsInboxQuickOpen(false)}
+                        onOpenConversation={openInboxConversationFromQuickPanel}
+                        onOpenInbox={openFullInboxFromQuickPanel}
+                      />
+                    </>
+                  )}
+                </AnimatePresence>
+                <AnimatePresence>
+                  {isNotificationsOpen && (
+                    <>
+                      <div className="fixed inset-0 z-[125]" onClick={() => setIsNotificationsOpen(false)} />
+                      <NotificationCenter notifications={notifications} onClose={() => setIsNotificationsOpen(false)} onMarkAllRead={markAllRead} getAppById={getAppById} onSelectApp={(id) => {
+                        const app = getAppById(id);
+                        if (app) { setSelectedApp(app); setIsNotificationsOpen(false); }
+                      }} />
+                    </>
+                  )}
+                </AnimatePresence>
+                <button
+                  type="button"
+                  onClick={handleProfileClick}
+                  className="relative cursor-pointer transition-transform hover:scale-[1.03] active:scale-[0.98]"
+                  aria-label="Open profile"
+                >
+                  <div className="w-8 h-8 rounded-full bg-zinc-800 border border-white/10 overflow-hidden hover:border-white/30 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.05)]">
+                    <img src={avatarUrl} alt={`${displayName} avatar`} className="w-full h-full object-cover" />
+                  </div>
+                  {profileInboxBadgeCount > 0 && (
+                    <span className="pointer-events-none absolute -top-2 -right-2 min-w-[20px] h-5 px-1.5 rounded-full bg-gradient-to-b from-[#FF6B7A] via-[#FF3B5C] to-[#FF2D55] text-white text-[10px] font-black font-mono-data inline-flex items-center justify-center border border-white/35 shadow-[0_10px_24px_rgba(255,45,85,0.55),0_0_0_1px_rgba(0,0,0,0.55)] backdrop-blur-md">
+                      {profileInboxBadgeCount > 99 ? '99+' : profileInboxBadgeCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </nav>
@@ -453,7 +800,12 @@ const App: React.FC = () => {
 
           {activeTab === 'Marketplace' && (
             <motion.div key="marketplace" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <MarketplaceView apps={apps} onSelectApp={(a) => setSelectedApp(a)} onOpenListApp={() => setIsListAppOpen(true)} />
+              <MarketplaceView
+                apps={apps}
+                onSelectApp={(a) => setSelectedApp(a)}
+                onOpenListApp={() => setIsListAppOpen(true)}
+                onOpenMembership={() => setIsAuthOpen(true)}
+              />
             </motion.div>
           )}
 
@@ -482,12 +834,14 @@ const App: React.FC = () => {
         {isProfileOpen && (
           <ProfileView
             wishlist={wishlist}
-            myJams={apps.filter(a => a.id === '1')}
+            myJams={myProfileJams}
             displayName={displayName}
             handle={handle}
             avatarUrl={avatarUrl}
             isSigningOut={isSigningOut}
             onSignOut={handleSignOut}
+            focusConversationId={profileFocusConversationId}
+            onFocusConversationHandled={() => setProfileFocusConversationId(null)}
             onClose={() => setIsProfileOpen(false)}
             onSelectApp={(app) => {
               setIsProfileOpen(false);
@@ -500,7 +854,14 @@ const App: React.FC = () => {
         {isAuthOpen && <AuthModal onClose={() => setIsAuthOpen(false)} />}
       </AnimatePresence>
       <AnimatePresence>
-        {isStartJamOpen && <StartJamModal onClose={() => setIsStartJamOpen(false)} onPublish={handlePublishJam} />}
+        {isStartJamOpen && (
+          <StartJamModal
+            onClose={() => setIsStartJamOpen(false)}
+            onPublish={handlePublishJam}
+            defaultFounderName={displayName}
+            defaultFounderEmail={authEmail}
+          />
+        )}
       </AnimatePresence>
       <AnimatePresence>
         {isListAppOpen && <ListAppModal onClose={() => setIsListAppOpen(false)} onPublish={handlePublishJam} />}

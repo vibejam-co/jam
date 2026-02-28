@@ -1,9 +1,9 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Heart, ExternalLink, ShieldCheck, Flame, Users, 
-  TrendingUp, CreditCard, Layout, Zap, ArrowRight, User
+  TrendingUp, CreditCard, Layout, Zap, ArrowRight, User, PencilLine
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, 
@@ -12,6 +12,9 @@ import {
 import { VibeApp } from '../types';
 import GemstoneIcon from './GemstoneIcon';
 import RankingBadge from './RankingBadge';
+import { startInboxConversation, submitMarketplaceOffer } from '../lib/api';
+import { supabase } from '../lib/supabase-client';
+import ListingEditModal, { ListingEditSeed } from './ListingEditModal';
 
 interface JamDetailViewProps {
   app: VibeApp | null;
@@ -20,8 +23,74 @@ interface JamDetailViewProps {
   isInWishlist?: boolean;
 }
 
+const normalizeWebsiteUrl = (input: unknown): string | null => {
+  if (typeof input !== 'string') {
+    return null;
+  }
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^[a-z0-9.-]+\.[a-z]{2,}/i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  return null;
+};
+
 const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWishlist, isInWishlist }) => {
   if (!app) return null;
+  const canShowDealActions = Boolean(app.isForSale) && !Boolean(app.isOwnerListing);
+  const canSendOfferNow = canShowDealActions && Boolean(app.marketplaceAssetId);
+  const [isOfferOpen, setIsOfferOpen] = useState(false);
+  const [offerPrice, setOfferPrice] = useState('');
+  const [offerMessage, setOfferMessage] = useState('');
+  const [contactMessage, setContactMessage] = useState('');
+  const [isContactComposerOpen, setIsContactComposerOpen] = useState(false);
+  const [isSubmittingOffer, setIsSubmittingOffer] = useState(false);
+  const [isContactingSeller, setIsContactingSeller] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [offerError, setOfferError] = useState<string | null>(null);
+  const [offerSuccess, setOfferSuccess] = useState<string | null>(null);
+
+  const listingEditSeed: ListingEditSeed | null = useMemo(() => {
+    if (!app.marketplaceAssetId || !app.isOwnerListing) {
+      return null;
+    }
+
+    const askingDigits = String(app.askingPrice || '').replace(/[^0-9]/g, '');
+    return {
+      id: app.marketplaceAssetId,
+      name: app.name,
+      tagline: app.pitch,
+      description: app.solution || app.pitch,
+      category: app.category,
+      techStack: app.techStack,
+      founderName: app.founder?.name,
+      founderEmail: app.founder?.email,
+      askingPriceCents: askingDigits ? Number(askingDigits) * 100 : 0,
+      profitMarginPercent: typeof app.profitMargin === 'number' ? app.profitMargin : null,
+      isAnonymous: Boolean(app.isAnonymous),
+      visibility: 'public',
+    };
+  }, [app]);
+
+  const websiteUrl = useMemo(() => {
+    const candidates = [
+      normalizeWebsiteUrl((app as any).websiteUrl),
+      normalizeWebsiteUrl((app as any).website),
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    return 'https://www.vibejam.co';
+  }, [app]);
 
   const formattedLifetime = new Intl.NumberFormat('en-US', {
     style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1
@@ -30,6 +99,124 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
   const formattedMonthly = new Intl.NumberFormat('en-US', {
     style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1
   }).format(app.monthlyRevenue);
+
+  const handleSubmitOffer = async () => {
+    if (!app.marketplaceAssetId) {
+      return;
+    }
+
+    if (!supabase) {
+      setOfferError('Auth is not configured. Unable to submit offer.');
+      return;
+    }
+
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) {
+      setOfferError('Sign in to submit an offer.');
+      return;
+    }
+
+    if (!offerPrice.trim()) {
+      setOfferError('Enter an offer price.');
+      return;
+    }
+
+    if (!offerMessage.trim() || offerMessage.trim().length < 4) {
+      setOfferError('Add a short message (4+ characters).');
+      return;
+    }
+
+    setIsSubmittingOffer(true);
+    setOfferError(null);
+    setOfferSuccess(null);
+
+    try {
+      const result = await submitMarketplaceOffer({
+        assetId: app.marketplaceAssetId,
+        offerPriceUsd: offerPrice,
+        message: offerMessage,
+      });
+      const inboxStatus = result.inboxStatus ?? (result.conversationId ? 'created' : 'skipped');
+      const emailStatus = result.emailStatus;
+      let successCopy = 'Offer sent.';
+      if (inboxStatus === 'created' && emailStatus === 'sent') {
+        successCopy = 'Offer sent. Seller inbox and email were notified.';
+      } else if (inboxStatus === 'created') {
+        successCopy = 'Offer sent. Seller inbox was updated.';
+      } else if (emailStatus === 'sent') {
+        successCopy = 'Offer sent. Seller email was notified.';
+      } else {
+        successCopy = 'Offer sent. Seller notifications will sync shortly.';
+      }
+      setOfferSuccess(successCopy);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
+      }
+      if (result.conversationId && typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('profile:focus-conversation', {
+            detail: { conversationId: result.conversationId },
+          }),
+        );
+      }
+      setOfferPrice('');
+      setOfferMessage('');
+      setIsOfferOpen(false);
+    } catch (error) {
+      setOfferError(error instanceof Error ? error.message : 'Failed to send offer.');
+    } finally {
+      setIsSubmittingOffer(false);
+    }
+  };
+
+  const handleContactSeller = async () => {
+    if (!app.marketplaceAssetId || isContactingSeller) {
+      return;
+    }
+
+    if (!supabase) {
+      setOfferError('Auth is not configured. Unable to start conversation.');
+      return;
+    }
+
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) {
+      setOfferError('Sign in to contact the seller.');
+      return;
+    }
+
+    const initialMessage = contactMessage.trim();
+    if (initialMessage.length < 4) {
+      setOfferError('Add a short message (4+ characters) before contacting the seller.');
+      return;
+    }
+
+    setIsContactingSeller(true);
+    setOfferError(null);
+    setOfferSuccess(null);
+
+    try {
+      const result = await startInboxConversation({
+        listingId: app.marketplaceAssetId,
+        initialMessage,
+      });
+      setOfferSuccess('Message sent. Open Profile > Inbox to continue.');
+      setContactMessage('');
+      setIsContactComposerOpen(false);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
+        window.dispatchEvent(
+          new CustomEvent('profile:focus-conversation', {
+            detail: { conversationId: result.conversationId },
+          }),
+        );
+      }
+    } catch (error) {
+      setOfferError(error instanceof Error ? error.message : 'Failed to contact seller.');
+    } finally {
+      setIsContactingSeller(false);
+    }
+  };
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
@@ -77,9 +264,60 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
           </div>
 
           <div className="flex items-center gap-3">
-            <button className="px-5 py-2 rounded-full bg-white text-black text-xs font-bold hover:bg-zinc-200 transition-colors flex items-center gap-2">
+            <a
+              href={websiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(event) => event.stopPropagation()}
+              className="px-5 py-2 rounded-full bg-white text-black text-xs font-bold hover:bg-zinc-200 transition-colors flex items-center gap-2"
+            >
               Website <ExternalLink className="w-3.5 h-3.5" />
-            </button>
+            </a>
+            {canShowDealActions && (
+              <button
+                onClick={() => {
+                  setOfferError(null);
+                  setOfferSuccess(null);
+                  if (!canSendOfferNow) {
+                    setOfferError('Seller has not activated this listing for live offers yet.');
+                    setIsOfferOpen(true);
+                    return;
+                  }
+                  setIsContactComposerOpen(false);
+                  setIsOfferOpen((prev) => !prev);
+                }}
+                className="px-5 py-2 rounded-full border border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#D4AF37] text-xs font-bold hover:bg-[#D4AF37] hover:text-black transition-colors"
+              >
+                Make Offer
+              </button>
+            )}
+            {canShowDealActions && (
+              <button
+                onClick={
+                  canSendOfferNow
+                    ? () => {
+                      setOfferError(null);
+                      setOfferSuccess(null);
+                      setIsOfferOpen(true);
+                      setIsContactComposerOpen(true);
+                    }
+                    : undefined
+                }
+                disabled={isContactingSeller || !canSendOfferNow}
+                className="px-4 py-2 rounded-full border border-white/20 text-zinc-300 text-xs font-bold hover:bg-white hover:text-black transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                Contact Seller
+              </button>
+            )}
+            {listingEditSeed && (
+              <button
+                onClick={() => setIsEditOpen(true)}
+                className="px-4 py-2 rounded-full border border-cyan-400/40 bg-cyan-400/10 text-cyan-300 text-xs font-bold hover:bg-cyan-300 hover:text-black transition-colors inline-flex items-center gap-2"
+              >
+                <PencilLine className="w-3.5 h-3.5" />
+                Edit
+              </button>
+            )}
             <button 
               onClick={() => onToggleWishlist?.(app)}
               className={`p-2.5 rounded-full border transition-all group ${isInWishlist ? 'border-red-500 bg-red-500/10' : 'border-white/10 hover:bg-white/5'}`}
@@ -98,6 +336,110 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
 
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto no-scrollbar p-6 md:p-10 space-y-12">
+          {canShowDealActions && (
+            <section className="p-6 rounded-2xl border border-[#D4AF37]/20 bg-[#D4AF37]/5">
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white tracking-tight">Acquisition Offer Desk</h3>
+                  <p className="text-zinc-500 text-xs">Submit a private offer directly to the seller.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setIsOfferOpen((prev) => {
+                      const next = !prev;
+                      if (!next) {
+                        setIsContactComposerOpen(false);
+                      }
+                      return next;
+                    })
+                  }
+                  className="px-4 py-2 rounded-full border border-white/20 text-[10px] font-black uppercase tracking-widest text-zinc-300 hover:bg-white hover:text-black transition-all"
+                >
+                  {isOfferOpen ? 'Close' : 'Open'}
+                </button>
+              </div>
+
+              {isOfferOpen && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Offer Price (USD)</label>
+                      <input
+                        type="text"
+                        value={offerPrice}
+                        onChange={(event) => setOfferPrice(event.target.value)}
+                        placeholder="e.g. 450,000"
+                        className="w-full h-12 rounded-xl bg-white/5 border border-white/10 px-4 text-white focus:outline-none focus:border-white/30"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Message</label>
+                      <input
+                        type="text"
+                        value={offerMessage}
+                        onChange={(event) => setOfferMessage(event.target.value)}
+                        placeholder="Introduce your intent and close timeline"
+                        className="w-full h-12 rounded-xl bg-white/5 border border-white/10 px-4 text-white focus:outline-none focus:border-white/30"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                      Offers create a pipeline stage and notify seller instantly.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSubmitOffer}
+                      disabled={isSubmittingOffer || !canSendOfferNow}
+                      className="h-11 px-6 rounded-full bg-white text-black text-[10px] font-black uppercase tracking-widest hover:bg-zinc-200 transition-all disabled:opacity-60"
+                    >
+                      {isSubmittingOffer ? 'Sending...' : canSendOfferNow ? 'Send Offer' : 'Unavailable'}
+                    </button>
+                  </div>
+
+                  {isContactComposerOpen && (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                        Contact Seller
+                      </div>
+                      <input
+                        type="text"
+                        value={contactMessage}
+                        onChange={(event) => setContactMessage(event.target.value)}
+                        placeholder="Write your message to the seller"
+                        className="w-full h-12 rounded-xl bg-black/40 border border-white/10 px-4 text-white focus:outline-none focus:border-white/30"
+                      />
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsContactComposerOpen(false);
+                            setContactMessage('');
+                            setOfferError(null);
+                          }}
+                          className="h-10 px-4 rounded-full border border-white/20 text-zinc-300 text-[10px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleContactSeller}
+                          disabled={isContactingSeller || contactMessage.trim().length < 4}
+                          className="h-10 px-4 rounded-full bg-white text-black text-[10px] font-black uppercase tracking-widest hover:bg-zinc-200 transition-all disabled:opacity-60"
+                        >
+                          {isContactingSeller ? 'Sending...' : 'Send Message'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {offerError && <p className="mt-4 text-xs text-red-400">{offerError}</p>}
+              {offerSuccess && <p className="mt-4 text-xs text-emerald-400">{offerSuccess}</p>}
+            </section>
+          )}
           
           {/* SECTION A: THE METRICS GRID (The 4 Pillars) */}
           <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -235,6 +577,21 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
 
         </div>
       </motion.div>
+
+      <AnimatePresence>
+        {isEditOpen && listingEditSeed && (
+          <ListingEditModal
+            seed={listingEditSeed}
+            onClose={() => setIsEditOpen(false)}
+            onSaved={() => {
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('marketplace:refresh'));
+                window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
+              }
+            }}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

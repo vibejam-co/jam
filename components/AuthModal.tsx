@@ -33,6 +33,9 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
       provider: 'google',
       options: {
         redirectTo: `${window.location.origin}`,
+        queryParams: {
+          prompt: 'select_account',
+        },
       },
     });
 

@@ -4,6 +4,25 @@ import type {
   CanvasSessionResponse,
   CanvasOnboardingPayload,
   CanvasPublishResult,
+  MarketplaceAssetDetailResponse,
+  MarketplaceAssetDraftInput,
+  MarketplaceAssetsResponse,
+  MarketplaceListingUpdateInput,
+  MarketplaceOfferResponse,
+  MarketplaceMyAssetsResponse,
+  ProfileMarketplaceSummary,
+  InboxConversationSummary,
+  InboxMessagesResponse,
+  InboxSendMessageResponse,
+  AcquirePipelineResponse,
+  AcquireStage,
+  WishlistListingItem,
+  MarketplaceConnectResponse,
+  MarketplaceConnectInput,
+  MarketplaceOfferInput,
+  MarketplacePublishPaymentRequiredResponse,
+  MarketplacePublishSuccessResponse,
+  MarketplacePublishInput,
   Notification,
   VibeApp,
 } from '../types';
@@ -84,3 +103,170 @@ export const fetchMyCanvasSession = () =>
 
 export const fetchPublicCanvasSession = (slug: string) =>
   request<CanvasPublicSessionResponse>(`/api/canvas?mode=public&slug=${encodeURIComponent(slug)}`);
+
+export const fetchMarketplaceAssets = (params?: {
+  q?: string;
+  category?: string;
+  min_mrr?: number;
+  max_price?: number;
+  min_rev30?: number;
+  max_multiple?: number;
+  verified_only?: boolean;
+  sort?: 'latest' | 'mrr' | 'rev30' | 'multiple';
+  page?: number;
+  pageSize?: number;
+}) => {
+  const query = new URLSearchParams();
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null || value === '') {
+        continue;
+      }
+      query.set(key, String(value));
+    }
+  }
+  const suffix = query.toString();
+  return request<MarketplaceAssetsResponse>(`/api/marketplace/assets${suffix ? `?${suffix}` : ''}`);
+};
+
+export const fetchMarketplaceAssetDetail = (idOrSlug: string) =>
+  request<MarketplaceAssetDetailResponse>(`/api/marketplace/assets?assetId=${encodeURIComponent(idOrSlug)}`);
+
+export const updateMarketplaceAsset = (
+  idOrSlug: string,
+  payload: MarketplaceListingUpdateInput,
+) =>
+  request<MarketplaceAssetDetailResponse>(`/api/marketplace/assets?assetId=${encodeURIComponent(idOrSlug)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+
+export const deleteMarketplaceAsset = (idOrSlug: string) =>
+  request<{ deleted: boolean; assetId: string }>(
+    `/api/marketplace/assets?assetId=${encodeURIComponent(idOrSlug)}`,
+    {
+      method: 'DELETE',
+    },
+  );
+
+export const createMarketplaceAssetDraft = (payload: MarketplaceAssetDraftInput) =>
+  request<{ asset: unknown; draft: boolean }>('/api/marketplace/assets', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const connectMarketplaceAsset = (assetId: string, payload: MarketplaceConnectInput) =>
+  request<MarketplaceConnectResponse>(
+    `/api/marketplace/assets/${encodeURIComponent(assetId)}/connect`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+
+export const publishMarketplaceAsset = (assetId: string, payload: MarketplacePublishInput) =>
+  request<MarketplacePublishSuccessResponse | MarketplacePublishPaymentRequiredResponse>(
+    `/api/marketplace/assets/${encodeURIComponent(assetId)}/publish`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+
+export const submitMarketplaceOffer = (payload: MarketplaceOfferInput) =>
+  request<MarketplaceOfferResponse>('/api/marketplace/offers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const fetchMyMarketplaceAssets = (options?: {
+  includeOfferItems?: boolean;
+  assetId?: string;
+  markViewed?: boolean;
+}) => {
+  const query = new URLSearchParams();
+  if (options?.includeOfferItems) {
+    query.set('include_offer_items', 'true');
+  }
+  if (options?.assetId) {
+    query.set('asset_id', options.assetId);
+  }
+  if (options?.markViewed) {
+    query.set('mark_viewed', 'true');
+  }
+  const suffix = query.toString();
+  return request<MarketplaceMyAssetsResponse>(`/api/marketplace/my-assets${suffix ? `?${suffix}` : ''}`);
+};
+
+export const fetchProfileMarketplaceSummary = () =>
+  request<ProfileMarketplaceSummary>('/api/profile-marketplace?scope=profile-summary');
+
+export const fetchInboxConversations = () =>
+  request<{ items: InboxConversationSummary[] }>('/api/profile-marketplace?scope=inbox-conversations');
+
+export const fetchInboxMessages = (conversationId: string) =>
+  request<InboxMessagesResponse>(
+    `/api/profile-marketplace?scope=inbox-messages&conversationId=${encodeURIComponent(conversationId)}`,
+  );
+
+export const sendInboxMessage = (payload: { conversationId: string; body: string }) =>
+  request<InboxSendMessageResponse>('/api/profile-marketplace?scope=inbox-send', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const startInboxConversation = (payload: { listingId: string; initialMessage?: string }) =>
+  request<{
+    conversationId: string;
+    listing: { id: string; name: string };
+    created: boolean;
+  }>('/api/profile-marketplace?scope=inbox-start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const fetchAcquirePipeline = () =>
+  request<AcquirePipelineResponse>('/api/profile-marketplace?scope=acquire-pipeline');
+
+export const upsertAcquirePipelineItem = (payload: {
+  listingId: string;
+  stage?: AcquireStage;
+  notes?: string;
+}) =>
+  request<AcquirePipelineResponse>('/api/profile-marketplace?scope=acquire-pipeline', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const updateAcquireStage = (payload: {
+  listingId: string;
+  stage: AcquireStage;
+  notes?: string;
+  message?: string;
+}) =>
+  request<{
+    listingId: string;
+    stage: AcquireStage;
+    stageLabel: string;
+    conversationId: string | null;
+  }>('/api/profile-marketplace?scope=acquire-stage', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const fetchWishlistItems = () =>
+  request<{ items: WishlistListingItem[] }>('/api/profile-marketplace?scope=wishlist');
+
+export const addWishlistItem = (listingId: string) =>
+  request<{ success: true; listingId: string }>('/api/profile-marketplace?scope=wishlist', {
+    method: 'POST',
+    body: JSON.stringify({ listingId }),
+  });
+
+export const removeWishlistItem = (listingId: string) =>
+  request<{ success: true; listingId: string }>(
+    `/api/profile-marketplace?scope=wishlist&listingId=${encodeURIComponent(listingId)}`,
+    {
+      method: 'DELETE',
+    },
+  );

@@ -1,68 +1,329 @@
-
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ShoppingBag, ArrowUpRight, ShieldCheck, CreditCard, DollarSign, Lock, Sparkles, ChevronRight, Plus } from 'lucide-react';
-import { VibeApp } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+import {
+  ShoppingBag,
+  ArrowUpRight,
+  ShieldCheck,
+  Lock,
+  Sparkles,
+  ChevronRight,
+  Plus,
+  Filter,
+} from 'lucide-react';
+import { VibeApp, MarketplaceAssetCard } from '../types';
 import GemstoneIcon from './GemstoneIcon';
+import { fetchMarketplaceAssets } from '../lib/api';
 
 interface MarketplaceViewProps {
   apps: VibeApp[];
   onSelectApp: (app: VibeApp) => void;
   onOpenListApp: () => void;
+  onOpenMembership?: () => void;
 }
 
-const MarketplaceView: React.FC<MarketplaceViewProps> = ({ apps, onSelectApp, onOpenListApp }) => {
-  const marketSource = apps.filter((app) => app.isForSale);
-  const fallbackApp: VibeApp = {
-    id: 'fallback',
-    rank: '01',
-    name: 'VibeJam Launch Asset',
-    pitch: 'Your first listed artifact will appear here.',
+type SortMode = 'latest' | 'mrr' | 'rev30' | 'multiple';
+
+const formatCurrencyCompact = (cents: number): string => {
+  const dollars = (cents || 0) / 100;
+  if (!Number.isFinite(dollars)) {
+    return '$0';
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+    notation: 'compact',
+  }).format(dollars);
+};
+
+const formatCurrencyFull = (cents: number): string => {
+  const dollars = (cents || 0) / 100;
+  if (!Number.isFinite(dollars)) {
+    return '$0';
+  }
+
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(dollars);
+};
+
+const formatPercent = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return '0%';
+  }
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded.toFixed(0)}%` : `${rounded.toFixed(1)}%`;
+};
+
+const churnBadgeMeta = (churnBps: number | null | undefined): {
+  label: string;
+  className: string;
+} => {
+  if (typeof churnBps !== 'number' || !Number.isFinite(churnBps) || churnBps < 0) {
+    return {
+      label: 'Churn: N/A',
+      className: 'border-zinc-700/60 bg-zinc-900/70 text-zinc-400',
+    };
+  }
+
+  const churnPercent = churnBps / 100;
+  if (churnPercent < 5) {
+    return {
+      label: `Low Churn: ${formatPercent(churnPercent)}`,
+      className: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300',
+    };
+  }
+
+  if (churnPercent <= 10) {
+    return {
+      label: `Medium Churn: ${formatPercent(churnPercent)}`,
+      className: 'border-yellow-500/40 bg-yellow-500/15 text-yellow-200',
+    };
+  }
+
+  return {
+    label: `High Churn: ${formatPercent(churnPercent)}`,
+    className: 'border-red-500/40 bg-red-500/15 text-red-200',
+  };
+};
+
+const mapAssetToVibeApp = (asset: MarketplaceAssetCard): VibeApp => {
+  const mrrDollars = Math.round(asset.mrrCents / 100);
+  const rev30Dollars = Math.round(asset.last30dRevenueCents / 100);
+  const growthPercent = Number((asset.last30dGrowthBps / 100).toFixed(2));
+  const askingPriceLabel = formatCurrencyCompact(asset.askingPriceCents);
+
+  const resolvedMarketplaceAssetId = asset.marketplaceAssetId
+    ?? (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(asset.id) ? asset.id : undefined);
+
+  return {
+    id: `market-${asset.id}`,
+    rank: 'MK',
+    name: asset.name,
+    pitch: asset.tagline,
     icon: '💎',
     accentColor: '212, 175, 55',
-    monthlyRevenue: 0,
-    lifetimeRevenue: 0,
+    monthlyRevenue: mrrDollars,
+    lifetimeRevenue: Math.max(rev30Dollars * 12, mrrDollars * 12),
     activeUsers: 0,
     buildStreak: 0,
-    growth: 0,
-    tags: ['SaaS'],
-    verified: true,
-    category: 'SaaS',
+    growth: growthPercent,
+    tags: [asset.category],
+    verified: asset.verifiedStatus === 'verified',
+    category: asset.category,
     founder: {
-      name: 'VibeJam',
-      handle: '@vibejam',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=VibeJam'
+      name: asset.isAnonymous ? 'Private Seller' : 'Founder',
+      handle: asset.isAnonymous ? '@private' : '@verified-founder',
+      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=MarketplaceSeller',
     },
-    techStack: [],
-    problem: '',
-    solution: '',
-    pricing: '',
-    revenueHistory: [],
+    techStack: asset.techStack,
+    problem: 'Owner is exploring strategic exits.',
+    solution: 'Acquire a verified revenue asset via structured pipeline.',
+    pricing: 'Acquisition Opportunity',
+    revenueHistory: [
+      { date: 'Last 30d', revenue: rev30Dollars },
+      { date: 'MRR', revenue: mrrDollars },
+    ],
     isForSale: true,
-    askingPrice: '$250k',
+    askingPrice: askingPriceLabel,
+    profitMargin: asset.profitMarginPercent ?? undefined,
+    isAnonymous: asset.isAnonymous,
+    marketplaceAssetId: resolvedMarketplaceAssetId,
+    valuationMultipleX100: asset.valuationMultipleX100,
+    marketplaceVerifiedStatus: asset.verifiedStatus,
+    isOwnerListing: Boolean(asset.isOwner),
   };
-  const baseSource = (marketSource.length > 0 ? marketSource : apps).length > 0
-    ? (marketSource.length > 0 ? marketSource : apps)
-    : [fallbackApp];
+};
 
-  // Keep the premium gate experience: 12 visible + locked tail.
-  const allMarketApps = Array.from({ length: Math.max(20, baseSource.length) }).map((_, i) => {
-    const baseApp = baseSource[i % baseSource.length];
-    const inferredPrice = `$${Math.max(50, Math.round(baseApp.monthlyRevenue * 0.024))}k`;
-    return {
-      ...baseApp,
-      id: `market-${i}`,
-      askingPrice: baseApp.askingPrice || inferredPrice,
-      multiple: `${(Math.random() * 5 + 4).toFixed(1)}x`,
-      isLocked: i >= 12
+const mapFallbackApps = (apps: VibeApp[]): MarketplaceAssetCard[] =>
+  apps
+    .filter((app) => app.isForSale)
+    .slice(0, 12)
+    .map((app, index) => ({
+      id: app.marketplaceAssetId || `jam-${app.id || `fallback-${index}`}`,
+      marketplaceAssetId: app.marketplaceAssetId,
+      slug: (app.name || `asset-${index}`).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      name: app.name,
+      tagline: app.pitch,
+      logoUrl: null,
+      category: app.category,
+      subcategory: null,
+      techStack: app.techStack,
+      askingPriceCents: Number(String(app.askingPrice || '').replace(/[^0-9]/g, '')) * 100 || Math.max(1500000, app.monthlyRevenue * 250),
+      currency: 'USD',
+      verifiedStatus: app.marketplaceVerifiedStatus ?? (app.verified ? 'verified' : 'unverified'),
+      visibility: 'public',
+      isAnonymous: Boolean(app.isAnonymous),
+      mrrCents: Math.max(0, Math.round(app.monthlyRevenue * 100)),
+      last30dRevenueCents: Math.max(0, Math.round(app.monthlyRevenue * 100)),
+      last30dGrowthBps: Math.round((app.growth || 0) * 100),
+      activeSubscribers: 0,
+      churnBps: null,
+      metricsProvider: null,
+      profitMarginPercent: app.profitMargin ?? null,
+      valuationMultipleX100: app.valuationMultipleX100 ?? null,
+      metricsUpdatedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isOwner: false,
+    }));
+
+const normalizeToken = (value: string | null | undefined): string =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
+
+const statusCopy: Record<string, { label: string; className: string }> = {
+  verified: { label: 'Verified', className: 'text-[#D4AF37]' },
+  pending: { label: 'Pending', className: 'text-cyan-400' },
+  error: { label: 'Needs Attention', className: 'text-red-400' },
+  unverified: { label: 'Unverified', className: 'text-zinc-500' },
+};
+
+const MarketplaceView: React.FC<MarketplaceViewProps> = ({
+  apps,
+  onSelectApp,
+  onOpenListApp,
+  onOpenMembership,
+}) => {
+  const [assets, setAssets] = useState<MarketplaceAssetCard[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [requiresMembership, setRequiresMembership] = useState(false);
+  const [lockedCount, setLockedCount] = useState(0);
+  const [sortMode, setSortMode] = useState<SortMode>('latest');
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [category, setCategory] = useState<string>('All');
+  const [minMrr, setMinMrr] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+
+  const fallbackAssets = useMemo(() => mapFallbackApps(apps), [apps]);
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    [...assets, ...fallbackAssets].forEach((item) => {
+      if (item.category) {
+        set.add(item.category);
+      }
+    });
+    return ['All', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+  }, [assets, fallbackAssets]);
+
+  const loadAssets = async (nextPage: number, append = false) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchMarketplaceAssets({
+        page: nextPage,
+        pageSize: 12,
+        sort: sortMode,
+        category: category === 'All' ? undefined : category,
+        verified_only: verifiedOnly,
+        min_mrr: minMrr ? Number(minMrr) : undefined,
+        max_price: maxPrice ? Number(maxPrice) : undefined,
+      });
+
+      const incoming = response.items || [];
+      setAssets((prev) => (append ? [...prev, ...incoming] : incoming));
+      setHasMore(response.hasMore);
+      setRequiresMembership(Boolean(response.meta?.requiresMembership));
+      setLockedCount(Math.max(0, Number(response.meta?.lockedCount || 0)));
+      setPage(nextPage);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to load marketplace assets.');
+      setAssets(fallbackAssets);
+      setHasMore(false);
+      setRequiresMembership(false);
+      setLockedCount(0);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAssets(1, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortMode, verifiedOnly, category, minMrr, maxPrice]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleRefresh = () => {
+      loadAssets(1, false);
     };
-  });
+    const handleListingPublished = () => {
+      setVerifiedOnly(false);
+      setSortMode('latest');
+      setCategory('All');
+      setPage(1);
+      loadAssets(1, false);
+    };
 
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+    window.addEventListener('marketplace:refresh', handleRefresh as EventListener);
+    window.addEventListener('marketplace:listing-published', handleListingPublished as EventListener);
+    return () => {
+      window.removeEventListener('marketplace:refresh', handleRefresh as EventListener);
+      window.removeEventListener('marketplace:listing-published', handleListingPublished as EventListener);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortMode, verifiedOnly, category, minMrr, maxPrice]);
+
+  const visibleAssets = useMemo(() => {
+    const seeded = [...assets];
+    const seen = new Set(
+      seeded.map((asset) => `${normalizeToken(asset.name)}::${normalizeToken(asset.category)}`),
+    );
+
+    const minMrrCents = minMrr ? Number(minMrr) * 100 : null;
+    const maxPriceCents = maxPrice ? Number(maxPrice) * 100 : null;
+
+    for (const fallback of fallbackAssets) {
+      if (category !== 'All' && normalizeToken(fallback.category) !== normalizeToken(category)) {
+        continue;
+      }
+      if (verifiedOnly && fallback.verifiedStatus !== 'verified') {
+        continue;
+      }
+      if (typeof minMrrCents === 'number' && Number.isFinite(minMrrCents) && fallback.mrrCents < minMrrCents) {
+        continue;
+      }
+      if (typeof maxPriceCents === 'number' && Number.isFinite(maxPriceCents) && fallback.askingPriceCents > maxPriceCents) {
+        continue;
+      }
+
+      const key = `${normalizeToken(fallback.name)}::${normalizeToken(fallback.category)}`;
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      seeded.push(fallback);
+    }
+
+    return seeded;
+  }, [assets, fallbackAssets, category, verifiedOnly, minMrr, maxPrice]);
+
+  const lockedPlaceholders = useMemo(() => {
+    if (!requiresMembership || lockedCount <= 0) {
+      return [] as Array<{ id: string; isLocked: true }>;
+    }
+
+    const count = Math.min(lockedCount, 8);
+    return Array.from({ length: count }).map((_, index) => ({
+      id: `locked-${index}`,
+      isLocked: true as const,
+    }));
+  }, [lockedCount, requiresMembership]);
 
   return (
     <div className="space-y-12">
-      {/* Strategic Header: Dual Entry Point */}
       <header className="mb-16 flex flex-col lg:flex-row lg:items-center justify-between gap-8">
         <div className="space-y-2">
           <motion.div
@@ -73,7 +334,7 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({ apps, onSelectApp, on
             <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] shadow-[0_0_8px_#D4AF37]" />
             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-[#D4AF37]">Premium Liquidity</span>
           </motion.div>
-          <motion.h2 
+          <motion.h2
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tighter text-white leading-[1.1]"
@@ -86,15 +347,15 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({ apps, onSelectApp, on
         </div>
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 lg:self-end pb-1">
-          {/* Live Data Chip */}
           <div className="hidden xs:flex items-center gap-4 bg-white/[0.03] border border-white/5 p-1 rounded-full backdrop-blur-md">
-             <div className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-400">Live Deal Flow</div>
-             <div className="h-4 w-[1px] bg-white/10" />
-             <div className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white font-mono-data">1,248 ASSETS</div>
+            <div className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-400">Live Deal Flow</div>
+            <div className="h-4 w-[1px] bg-white/10" />
+            <div className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white font-mono-data">
+              {visibleAssets.length.toLocaleString()} ASSETS
+            </div>
           </div>
 
-          {/* Minimalist Seller Entry Point */}
-          <button 
+          <button
             onClick={onOpenListApp}
             className="group relative h-14 px-8 rounded-full border border-[#D4AF37]/30 bg-[#D4AF37]/5 text-[#D4AF37] font-black uppercase tracking-widest text-[11px] flex items-center gap-3 hover:bg-[#D4AF37] hover:text-black transition-all duration-500 hover:shadow-[0_0_30px_rgba(212,175,55,0.2)] active:scale-95 overflow-hidden"
           >
@@ -105,141 +366,253 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({ apps, onSelectApp, on
         </div>
       </header>
 
+      <section className="rounded-3xl border border-white/10 bg-white/[0.02] px-4 py-4 sm:px-6 flex flex-col gap-4">
+        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
+          <Filter className="w-3.5 h-3.5" />
+          Marketplace Filters
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {categories.slice(0, 8).map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setCategory(item)}
+              className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${
+                category === item
+                  ? 'bg-white text-black border-white'
+                  : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/25'
+              }`}
+            >
+              {item}
+            </button>
+          ))}
+
+          <button
+            type="button"
+            onClick={() => setVerifiedOnly((prev) => !prev)}
+            className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${
+              verifiedOnly
+                ? 'bg-yellow-500/15 text-[#D4AF37] border-yellow-500/30'
+                : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/25'
+            }`}
+          >
+            Verified Only
+          </button>
+
+          {(['latest', 'mrr', 'rev30', 'multiple'] as const).map((sort) => (
+            <button
+              key={sort}
+              type="button"
+              onClick={() => setSortMode(sort)}
+              className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${
+                sortMode === sort
+                  ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                  : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/25'
+              }`}
+            >
+              {sort === 'latest' ? 'Latest' : sort === 'mrr' ? 'Top MRR' : sort === 'rev30' ? 'Top 30D Rev' : 'Lowest Multiple'}
+            </button>
+          ))}
+
+          <div className="ml-auto flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              value={minMrr}
+              onChange={(event) => setMinMrr(event.target.value)}
+              placeholder="Min MRR ($)"
+              className="h-9 w-28 rounded-full bg-black/60 border border-white/10 px-3 text-[10px] font-black uppercase tracking-widest text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-white/25"
+            />
+            <input
+              type="number"
+              min={0}
+              value={maxPrice}
+              onChange={(event) => setMaxPrice(event.target.value)}
+              placeholder="Max Price ($)"
+              className="h-9 w-32 rounded-full bg-black/60 border border-white/10 px-3 text-[10px] font-black uppercase tracking-widest text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-white/25"
+            />
+          </div>
+        </div>
+      </section>
+
+      {error && (
+        <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-5 py-4 text-xs text-yellow-200">
+          Backend notice: {error}
+        </div>
+      )}
+
       <div className="relative">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {allMarketApps.map((app, i) => (
+          {visibleAssets.map((asset, i) => {
+            const status = statusCopy[asset.verifiedStatus] ?? statusCopy.unverified;
+            const multipleLabel = asset.valuationMultipleX100 && asset.valuationMultipleX100 > 0
+              ? `${(asset.valuationMultipleX100 / 100).toFixed(2)}x`
+              : '—';
+            const churnMeta = churnBadgeMeta(asset.churnBps);
+
+            return (
+              <motion.div
+                key={asset.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: (i % 12) * 0.05 }}
+                onClick={() => onSelectApp(mapAssetToVibeApp(asset))}
+                className="group relative p-6 rounded-[24px] bg-white/[0.02] border border-white/5 transition-all duration-500 flex flex-col h-full hover:border-yellow-500/30 cursor-pointer"
+              >
+                <div className="flex justify-between items-start mb-6">
+                  <GemstoneIcon icon="💎" accentColor="212, 175, 55" isHovered={true} />
+                  <div className="text-right space-y-2">
+                    <span className="block text-[10px] text-zinc-500 font-black uppercase tracking-widest mb-1">Asking Price</span>
+                    <span className="block text-2xl font-mono-data text-[#D4AF37] font-bold tracking-tighter">
+                      {formatCurrencyCompact(asset.askingPriceCents)}
+                    </span>
+                    <span
+                      className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-widest ${churnMeta.className}`}
+                    >
+                      {churnMeta.label}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mb-6 flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-xl font-bold text-white tracking-tight">{asset.name}</h3>
+                    <ShieldCheck className="w-4 h-4 text-[#D4AF37]" />
+                  </div>
+                  <p className="text-zinc-500 text-sm leading-relaxed line-clamp-2">{asset.tagline}</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 py-4 border-y border-white/5 mb-6">
+                  <div>
+                    <span className="block text-[9px] text-zinc-600 font-black uppercase tracking-widest mb-1">Monthly Rev</span>
+                    <span className="block text-sm font-mono-data text-[#00FF41] font-bold">
+                      {formatCurrencyFull(asset.mrrCents)}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="block text-[9px] text-zinc-600 font-black uppercase tracking-widest mb-1">Valuation Multiple</span>
+                    <span className="block text-sm font-mono-data text-white font-bold">{multipleLabel}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between mt-auto">
+                  <div className="flex gap-2 items-center">
+                    <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-[9px] text-zinc-400 font-bold tracking-widest uppercase">
+                      {asset.category}
+                    </span>
+                    <span className={`text-[9px] font-black uppercase tracking-widest ${status.className}`}>
+                      {status.label}
+                    </span>
+                  </div>
+                  <button className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-[#D4AF37] group-hover:text-white transition-colors">
+                    View Deal <ArrowUpRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                  </button>
+                </div>
+
+                <div className="absolute inset-0 rounded-[24px] opacity-0 group-hover:opacity-5 transition-opacity pointer-events-none bg-yellow-500" />
+              </motion.div>
+            );
+          })}
+
+          {lockedPlaceholders.map((item, index) => (
             <motion.div
-              key={app.id}
+              key={item.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: (i % 12) * 0.05 }}
-              onClick={() => !app.isLocked && onSelectApp(app as any)}
-              className={`group relative p-6 rounded-[24px] bg-white/[0.02] border transition-all duration-500 flex flex-col h-full
-                ${app.isLocked 
-                  ? 'border-white/5 opacity-40 grayscale blur-[4px] pointer-events-none' 
-                  : 'border-white/5 hover:border-yellow-500/30 cursor-pointer'}`}
+              transition={{ delay: (index % 12) * 0.05 }}
+              className="group relative p-6 rounded-[24px] bg-white/[0.02] border border-white/5 transition-all duration-500 flex flex-col h-full opacity-40 grayscale blur-[2px] pointer-events-none"
             >
-              {/* Top Row: Icon & Asking Price */}
               <div className="flex justify-between items-start mb-6">
-                <GemstoneIcon icon={app.icon} accentColor={app.accentColor} isHovered={!app.isLocked} />
+                <GemstoneIcon icon="🔒" accentColor="80, 80, 80" isHovered={false} />
                 <div className="text-right">
                   <span className="block text-[10px] text-zinc-500 font-black uppercase tracking-widest mb-1">Asking Price</span>
-                  <span className="block text-2xl font-mono-data text-[#D4AF37] font-bold tracking-tighter">{app.askingPrice}</span>
+                  <span className="block text-2xl font-mono-data text-zinc-500 font-bold tracking-tighter">Locked</span>
                 </div>
               </div>
-
-              {/* Title & Pitch */}
               <div className="mb-6 flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <h3 className="text-xl font-bold text-white tracking-tight">{app.name}</h3>
-                  <ShieldCheck className="w-4 h-4 text-[#D4AF37]" />
-                </div>
-                <p className="text-zinc-500 text-sm leading-relaxed line-clamp-2">
-                  {app.pitch}
-                </p>
+                <div className="h-5 bg-zinc-800/70 rounded w-2/3 mb-3" />
+                <div className="h-3 bg-zinc-900/80 rounded w-full mb-2" />
+                <div className="h-3 bg-zinc-900/70 rounded w-4/5" />
               </div>
-
-              {/* Metrics Row */}
-              <div className="grid grid-cols-2 gap-4 py-4 border-y border-white/5 mb-6">
-                <div>
-                  <span className="block text-[9px] text-zinc-600 font-black uppercase tracking-widest mb-1">Monthly Rev</span>
-                  <span className="block text-sm font-mono-data text-[#00FF41] font-bold">
-                    ${app.monthlyRevenue.toLocaleString()}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className="block text-[9px] text-zinc-600 font-black uppercase tracking-widest mb-1">Valuation Multiple</span>
-                  <span className="block text-sm font-mono-data text-white font-bold">{app.multiple}</span>
-                </div>
-              </div>
-
-              {/* Bottom Actions */}
-              <div className="flex items-center justify-between mt-auto">
-                <div className="flex gap-2">
-                  {app.tags.slice(0, 2).map(tag => (
-                    <span key={tag} className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-[9px] text-zinc-400 font-bold tracking-widest uppercase">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                <button className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-[#D4AF37] group-hover:text-white transition-colors">
-                  View Deal <ArrowUpRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                </button>
-              </div>
-
-              {!app.isLocked && (
-                <div 
-                  className="absolute inset-0 rounded-[24px] opacity-0 group-hover:opacity-5 transition-opacity pointer-events-none"
-                  style={{ backgroundColor: `rgb(${app.accentColor})` }}
-                />
-              )}
+              <div className="h-16 rounded-xl border border-white/5 bg-black/30" />
             </motion.div>
           ))}
         </div>
 
-        {/* The Luxury Gating Overlay */}
-        {!isLoggedIn && (
+        {isLoading && (
+          <div className="mt-8 text-center text-[10px] font-black uppercase tracking-[0.3em] text-zinc-600">
+            Loading Marketplace
+          </div>
+        )}
+
+        {!isLoading && hasMore && (
+          <div className="mt-8 flex justify-center">
+            <button
+              type="button"
+              onClick={() => loadAssets(page + 1, true)}
+              className="h-12 px-8 rounded-full border border-white/15 text-xs font-black uppercase tracking-widest text-zinc-300 hover:bg-white hover:text-black transition-all"
+            >
+              Load More Assets
+            </button>
+          </div>
+        )}
+
+        {requiresMembership && lockedCount > 0 && (
           <div className="absolute inset-x-0 bottom-0 h-[600px] flex items-end justify-center pb-32">
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none" />
-            
-            <motion.div 
+
+            <motion.div
               initial={{ opacity: 0, y: 40 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               className="relative z-10 w-full max-w-2xl mx-auto px-6 text-center"
             >
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-yellow-500/10 border border-yellow-500/20 mb-8 backdrop-blur-xl">
-                 <Lock className="w-3.5 h-3.5 text-[#D4AF37]" />
-                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D4AF37]">Proprietary Deal Flow</span>
+                <Lock className="w-3.5 h-3.5 text-[#D4AF37]" />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#D4AF37]">Proprietary Deal Flow</span>
               </div>
-              
+
               <h3 className="text-3xl md:text-5xl font-extrabold text-white tracking-tighter mb-6 leading-tight">
                 Unlock the <span className="italic font-serif-rank text-[#D4AF37]">Full Vault.</span>
               </h3>
-              
+
               <p className="text-zinc-500 text-lg md:text-xl font-medium mb-12 max-w-lg mx-auto leading-relaxed">
-                Gain unfiltered access to <span className="text-zinc-300">1,200+ high-velocity digital assets</span> and private deal rooms. Join the inner circle of accredited vibe-coded investors.
+                Gain access to <span className="text-zinc-300">{lockedCount.toLocaleString()} additional members-only assets</span> and deeper due diligence streams.
               </p>
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <button 
-                  onClick={() => setIsLoggedIn(true)}
+                <button
+                  onClick={() => onOpenMembership?.()}
                   className="h-16 px-10 rounded-2xl bg-white text-black font-black uppercase tracking-widest text-xs flex items-center gap-3 hover:scale-105 transition-all shadow-[0_0_60px_rgba(255,255,255,0.2)] active:scale-95"
                 >
-                  Join the Inner Circle <ChevronRight className="w-4 h-4" />
+                  Unlock Member Access <ChevronRight className="w-4 h-4" />
                 </button>
                 <div className="flex items-center gap-2 px-6 py-4 rounded-2xl border border-white/10 text-zinc-400 text-[10px] font-black uppercase tracking-widest">
                   <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> Member Access Only
                 </div>
               </div>
-              
-              <p className="mt-8 text-[9px] font-bold text-zinc-600 uppercase tracking-widest">
-                Trusted by 4,500+ institutional and boutique buyers worldwide.
-              </p>
             </motion.div>
           </div>
         )}
       </div>
-      
-      {/* Featured Banner - Bottom Retention */}
+
       <section className="mt-24 p-12 rounded-[40px] bg-gradient-to-br from-[#0A0A0A] to-[#000000] border border-white/5 flex flex-col md:flex-row items-center justify-between gap-12 overflow-hidden relative group">
         <div className="absolute inset-0 bg-gradient-to-r from-[#D4AF37]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-1000" />
-        
+
         <div className="relative z-10">
           <h3 className="text-3xl font-extrabold text-white mb-4 tracking-tighter">Ready to <span className="text-[#D4AF37]">Exit?</span></h3>
           <p className="text-zinc-500 max-w-md font-medium text-lg leading-relaxed">
             List your vibe-coded application on the Midnight Zenith marketplace and connect with thousands of accredited investors globally.
           </p>
         </div>
-        
-        <button 
+
+        <button
           onClick={onOpenListApp}
           className="relative z-10 h-16 px-12 rounded-full bg-white text-black font-black uppercase tracking-widest text-xs hover:bg-[#D4AF37] hover:scale-105 transition-all shadow-[0_20px_40px_rgba(0,0,0,0.4)] active:scale-95 flex items-center gap-3"
         >
           Begin Listing Process <ArrowUpRight className="w-4 h-4" />
         </button>
-        
-        {/* Subtle Decorative Icon */}
+
         <ShoppingBag className="absolute -right-8 -bottom-8 w-64 h-64 text-white/[0.02] rotate-12 pointer-events-none" />
       </section>
     </div>

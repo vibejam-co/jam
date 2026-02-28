@@ -1,5 +1,5 @@
 import type { Notification, RevenuePoint, VibeApp } from '../../types';
-import { formatRank, getRankTier, parseRankValue } from '../../lib/ranking';
+import { formatRank, getRankTier, parseRankValue } from '../../lib/ranking.js';
 
 type JamRow = {
   id: string;

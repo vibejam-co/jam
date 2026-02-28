@@ -4,14 +4,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, ChevronRight, ChevronLeft, Upload, 
   ShieldCheck, ExternalLink, Info, Globe, 
-  Layout, HelpCircle, Rocket, DollarSign,
-  TrendingUp, Users, Smartphone, Zap
+  HelpCircle, Rocket, DollarSign,
+  Users, Mail, Zap
 } from 'lucide-react';
 import { VibeApp } from '../types';
 
 interface StartJamModalProps {
   onClose: () => void;
   onPublish: (app: VibeApp) => void | Promise<void>;
+  defaultFounderName?: string;
+  defaultFounderEmail?: string;
 }
 
 type RevenueProvider = 'Stripe' | 'LemonSqueezy' | 'Polar' | 'Dodo' | 'RevenueCat' | null;
@@ -34,11 +36,17 @@ const CATEGORIES = [
   "Travel", "Utilities"
 ];
 
-const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => {
+const StartJamModal: React.FC<StartJamModalProps> = ({
+  onClose,
+  onPublish,
+  defaultFounderName = '',
+  defaultFounderEmail = '',
+}) => {
   const [step, setStep] = useState(1);
   const [selectedProvider, setSelectedProvider] = useState<RevenueProvider>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [providerApiKey, setProviderApiKey] = useState('');
 
   // Form State
   const [formData, setFormData] = useState({
@@ -48,13 +56,27 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
     icon: '✨',
     monthlyRevenue: 0,
     activeUsers: 0,
-    founderName: '',
+    founderName: defaultFounderName,
+    founderEmail: defaultFounderEmail,
     website: '',
     techStack: '',
     problem: '',
     solution: '',
     pricing: '',
+    publishToMarketplace: false,
+    marketplaceAskingPrice: '',
+    marketplaceProfitMargin: 70,
+    marketplaceVisibility: 'public' as 'public' | 'members_only' | 'private',
+    marketplaceIsAnonymous: false,
   });
+
+  const founderEmailValid =
+    !formData.founderEmail.trim()
+      ? false
+      : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.founderEmail.trim());
+
+  const marketplaceReady = !formData.publishToMarketplace
+    || (founderEmailValid && (formData.marketplaceAskingPrice.trim().length > 0 || formData.monthlyRevenue > 0));
 
   const nextStep = () => setStep(s => s + 1);
   const prevStep = () => setStep(s => s - 1);
@@ -63,6 +85,9 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
     if (isSubmitting) {
       return;
     }
+
+    const shouldPublishMarketplace = formData.publishToMarketplace;
+    const derivedAskingPrice = formData.marketplaceAskingPrice.trim() || String(Math.max(5000, formData.monthlyRevenue * 48));
 
     const newApp: VibeApp = {
       id: Math.random().toString(36).substr(2, 9),
@@ -77,12 +102,13 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
       buildStreak: 1,
       growth: 0,
       tags: [formData.category],
-      verified: true,
+      verified: Boolean(selectedProvider),
       category: formData.category,
       founder: {
         name: formData.founderName || 'Founder',
         handle: `@${(formData.founderName || 'founder').toLowerCase().replace(/\s/g, '')}`,
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${formData.founderName}`
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${formData.founderName}`,
+        email: formData.founderEmail.trim() || undefined,
       },
       techStack: formData.techStack.split(',').map(s => s.trim()),
       problem: formData.problem || 'Market inefficiency.',
@@ -90,7 +116,18 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
       pricing: formData.pricing || 'Freemium',
       revenueHistory: [
         { date: 'Month 1', revenue: formData.monthlyRevenue }
-      ]
+      ],
+      isForSale: shouldPublishMarketplace,
+      askingPrice: shouldPublishMarketplace ? `$${derivedAskingPrice}` : undefined,
+      profitMargin: shouldPublishMarketplace ? formData.marketplaceProfitMargin : undefined,
+      isAnonymous: shouldPublishMarketplace ? formData.marketplaceIsAnonymous : undefined,
+      boostTier: shouldPublishMarketplace ? 'Free' : undefined,
+      publishSource: 'start-jam',
+      publishToMarketplace: shouldPublishMarketplace,
+      marketplaceAskingPriceUsd: shouldPublishMarketplace ? derivedAskingPrice : undefined,
+      marketplaceVisibility: shouldPublishMarketplace ? formData.marketplaceVisibility : undefined,
+      marketplaceBoostTierId: shouldPublishMarketplace ? 'free' : undefined,
+      websiteUrl: formData.website.trim() || undefined,
     };
 
     setIsSubmitting(true);
@@ -258,13 +295,15 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
                     {selectedProvider === 'Stripe' && (
                       <InstructionGuide 
                         title="Stripe Verification"
-                        link="https://dashboard.stripe.com/login?redirect=%2Fapikeys%2Fcreate%3Fname%3DTrustMRR%26permissions%255B%255D%3Drak_charge_read%26permissions%255B%255D%3Drak_subscription_read%26permissions%255B%255D%3Drak_plan_read%26permissions%255B%255D%3Drak_bucket_connect_read%26permissions%255B%255D%3Drak_file_read"
+                        link="https://dashboard.stripe.com/apikeys"
                         guide={
                           <>
-                            <p>1. Click the button below to create a <strong>read-only</strong> API key.</p>
-                            <p>2. Scroll down and click <strong>'Create key'</strong>.</p>
-                            <p>3. <strong>Don't change the permissions</strong> — we need specific read access to verify your revenue.</p>
-                            <p className="text-zinc-500">Note: Don't delete the key or we can't refresh revenue updates.</p>
+                            <p><strong>Connect Stripe (100% Secure &amp; Read-Only)</strong></p>
+                            <p>VibeJam accepts only <strong>rk_live_</strong> restricted keys for Stripe, not full secret keys.</p>
+                            <p>1. Go to Stripe Dashboard -&gt; Developers -&gt; API Keys.</p>
+                            <p>2. Click <strong>Create Restricted Key</strong>.</p>
+                            <p>3. Name it <strong>"VibeJam Read-Only"</strong>.</p>
+                            <p>4. Enable read access for Charges, Subscriptions, and Invoices only.</p>
                           </>
                         }
                       />
@@ -273,13 +312,14 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
                     {selectedProvider === 'LemonSqueezy' && (
                       <InstructionGuide 
                         title="LemonSqueezy Verification"
-                        link="https://app.lemonsqueezy.com/auth/redirect?url=https%3A%2F%2Fapp.lemonsqueezy.com%2Fsettings%2Fapi"
+                        link="https://app.lemonsqueezy.com/settings/api"
                         guide={
                           <>
-                            <p>1. Click the button below to open your LemonSqueezy API settings.</p>
-                            <p>2. Click the <strong>+</strong> icon next to <strong>"API Keys"</strong>.</p>
-                            <p>3. Set the <strong>expiration date</strong> to 10+ years from now.</p>
-                            <p>4. Copy the generated key and paste it below.</p>
+                            <p><strong>Connect LemonSqueezy</strong></p>
+                            <p>1. Open LemonSqueezy Settings -&gt; API.</p>
+                            <p>2. Click Create New API Key.</p>
+                            <p>3. If permission controls are available, choose read-only Orders and Subscriptions scopes.</p>
+                            <p>4. Paste the key below. VibeJam stores it with AES-256 encryption.</p>
                           </>
                         }
                       />
@@ -289,55 +329,75 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
                       <>
                         <InstructionGuide 
                           title="Polar Verification"
-                          link="https://polar.sh/login?return_to=%2Fdashboard"
+                          link="https://polar.sh/dashboard"
                           guide={
                             <>
-                              <p>1. Click <strong>'Settings'</strong> on the left sidebar, then <strong>'General'</strong>.</p>
-                              <p>2. Scroll to bottom and click <strong>'New Token'</strong> button in 'Developer' section.</p>
-                              <p>3. Choose <strong>'No expiration'</strong>.</p>
-                              <p>4. Select <strong>'orders:read'</strong>, <strong>'subscriptions:read'</strong>, and <strong>'organizations:read'</strong> permissions.</p>
+                              <p><strong>Connect Polar</strong></p>
+                              <p>1. Open Polar -&gt; Settings -&gt; API Tokens.</p>
+                              <p>2. Create a personal access token.</p>
+                              <p>3. Select read scopes only (orders/subscriptions/metrics).</p>
+                              <p>4. Leave write scopes unchecked, then paste token below.</p>
                             </>
                           }
                         />
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                             <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Organization Identifier</label>
-                             <input type="text" placeholder="Found in Settings > General" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white" />
-                          </div>
-                        </div>
                       </>
                     )}
 
+                    {selectedProvider === 'Dodo' && (
+                      <InstructionGuide
+                        title="Dodo Verification"
+                        link="https://app.dodopayments.com"
+                        guide={
+                          <>
+                            <p><strong>Connect Dodo Payments</strong></p>
+                            <p>1. Open Dodo Dashboard -&gt; Developer/API Keys.</p>
+                            <p>2. Create a dedicated VibeJam metrics key.</p>
+                            <p>3. Prefer read-only scopes when available.</p>
+                            <p>4. Paste key below for a read-only ping test.</p>
+                          </>
+                        }
+                      />
+                    )}
+
                     {selectedProvider === 'RevenueCat' && (
-                      <div className="space-y-6">
-                        <InstructionGuide 
-                          title="RevenueCat Secret Key"
-                          link="https://app.revenuecat.com/login"
-                          guide={<p>Go to <strong>'API Keys'</strong> section. Create a new <strong>Secret API key</strong> (V2 API version + 'Read only' permissions for all).</p>}
-                        />
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                           <div className="space-y-2">
-                              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Project ID</label>
-                              <input type="text" placeholder="Found in Project Settings" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white" />
-                           </div>
-                           <div className="space-y-2">
-                              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Share URL Slug</label>
-                              <input type="text" placeholder="Verified page slug" className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white" />
-                           </div>
-                        </div>
-                      </div>
+                      <InstructionGuide 
+                        title="RevenueCat Secret Key"
+                        link="https://app.revenuecat.com/login"
+                        guide={
+                          <>
+                            <p><strong>Connect RevenueCat</strong></p>
+                            <p>1. Go to RevenueCat Project Settings -&gt; API Keys.</p>
+                            <p>2. Create a Secret Key (starts with <span className="font-mono">sk_</span>).</p>
+                            <p>3. RevenueCat does not directly move payout funds, so this key is used for subscription insights.</p>
+                            <p>4. Paste key below to verify.</p>
+                          </>
+                        }
+                      />
                     )}
 
                     <div className="space-y-2">
                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Paste API Key Here</label>
                        <input 
                         type="password" 
-                        placeholder="sk_..." 
-                        onChange={(e) => setFormData({...formData, monthlyRevenue: Math.floor(Math.random() * 50000) + 1000})} // Mock success
+                        placeholder={
+                          selectedProvider === 'Stripe'
+                            ? 'rk_live_...'
+                            : selectedProvider === 'RevenueCat'
+                              ? 'sk_...'
+                              : selectedProvider === 'Polar'
+                                ? 'polar_...'
+                                : selectedProvider === 'LemonSqueezy'
+                                  ? 'ls_...'
+                                  : selectedProvider === 'Dodo'
+                                    ? 'live_...'
+                                    : 'Read-only key (optional for ranking publish)'
+                        } 
+                        value={providerApiKey}
+                        onChange={(e) => setProviderApiKey(e.target.value)}
                         className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white font-mono-data" 
                        />
                        <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest mt-2 flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3" /> Encrypted & Secure
+                          <ShieldCheck className="w-3 h-3" /> VibeJam validates keys via read-only GET ping tests before encrypted storage.
                        </p>
                     </div>
                   </div>
@@ -355,6 +415,20 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
                 className="space-y-8"
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Monthly Revenue (USD)</label>
+                    <div className="relative">
+                      <input 
+                        type="number" 
+                        min={0}
+                        placeholder="0"
+                        value={formData.monthlyRevenue}
+                        onChange={(e) => setFormData({...formData, monthlyRevenue: Math.max(0, parseInt(e.target.value, 10) || 0)})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white pl-10"
+                      />
+                      <DollarSign className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Active Users</label>
                     <div className="relative">
@@ -379,6 +453,19 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
                         className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white pl-10"
                       />
                       <Rocket className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Founder Email</label>
+                    <div className="relative">
+                      <input 
+                        type="email" 
+                        placeholder="name@company.com"
+                        value={formData.founderEmail}
+                        onChange={(e) => setFormData({...formData, founderEmail: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white pl-10"
+                      />
+                      <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                     </div>
                   </div>
                 </div>
@@ -462,6 +549,89 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
                    </div>
                    <p className="text-zinc-500 text-xs">By publishing, your revenue data will be verified via {selectedProvider || 'manual entry'} and appear in the global rankings.</p>
                 </div>
+
+                <div className="p-6 rounded-3xl bg-[#D4AF37]/5 border border-[#D4AF37]/20 space-y-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="font-bold text-white text-sm tracking-tight">Also publish this Jam on Marketplace?</h4>
+                      <p className="text-zinc-500 text-xs mt-1">
+                        Optional. Keep Rankings-only, or list this same Jam for acquisition.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFormData((prev) => ({ ...prev, publishToMarketplace: !prev.publishToMarketplace }))}
+                      className={`w-12 h-6 rounded-full transition-all relative ${
+                        formData.publishToMarketplace ? 'bg-[#D4AF37]' : 'bg-white/10'
+                      }`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${formData.publishToMarketplace ? 'left-7' : 'left-1'}`} />
+                    </button>
+                  </div>
+
+                  {formData.publishToMarketplace && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Asking Price (USD)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          placeholder={String(Math.max(5000, formData.monthlyRevenue * 48))}
+                          value={formData.marketplaceAskingPrice}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, marketplaceAskingPrice: e.target.value }))}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Profit Margin (%)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={formData.marketplaceProfitMargin}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, marketplaceProfitMargin: Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0)) }))}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Visibility</label>
+                        <select
+                          value={formData.marketplaceVisibility}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              marketplaceVisibility: e.target.value as 'public' | 'members_only' | 'private',
+                            }))
+                          }
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
+                        >
+                          <option value="public">Public</option>
+                          <option value="members_only">Members Only</option>
+                          <option value="private">Private</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Seller Identity</label>
+                        <button
+                          type="button"
+                          onClick={() => setFormData((prev) => ({ ...prev, marketplaceIsAnonymous: !prev.marketplaceIsAnonymous }))}
+                          className="w-full h-[50px] rounded-xl bg-white/5 border border-white/10 px-4 text-left flex items-center justify-between"
+                        >
+                          <span className="text-sm text-white">{formData.marketplaceIsAnonymous ? 'Anonymous Listing' : 'Public Founder Profile'}</span>
+                          <span className={`w-10 h-5 rounded-full relative transition-all ${formData.marketplaceIsAnonymous ? 'bg-[#D4AF37]' : 'bg-white/15'}`}>
+                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${formData.marketplaceIsAnonymous ? 'left-5' : 'left-0.5'}`} />
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {formData.publishToMarketplace && !founderEmailValid && (
+                    <p className="text-[11px] text-red-300">
+                      Founder email is required to publish to Marketplace.
+                    </p>
+                  )}
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -479,9 +649,9 @@ const StartJamModal: React.FC<StartJamModalProps> = ({ onClose, onPublish }) => 
           
           <button 
             onClick={step === 4 ? handlePublish : nextStep}
-            disabled={isSubmitting || (step === 1 && !formData.name)}
+            disabled={isSubmitting || (step === 1 && !formData.name) || (step === 4 && !marketplaceReady)}
             className={`px-8 py-2.5 rounded-full font-black uppercase tracking-widest text-xs flex items-center gap-2 transition-all
-              ${isSubmitting || (step === 1 && !formData.name) ? 'bg-white/5 text-zinc-700 cursor-not-allowed' : 'bg-white text-black hover:scale-105 shadow-xl shadow-white/5'}`}
+              ${isSubmitting || (step === 1 && !formData.name) || (step === 4 && !marketplaceReady) ? 'bg-white/5 text-zinc-700 cursor-not-allowed' : 'bg-white text-black hover:scale-105 shadow-xl shadow-white/5'}`}
           >
             {step === 4 ? (
               isSubmitting ? <>Publishing...</> : <>Publish Jam <Rocket className="w-3.5 h-3.5" /></>

@@ -40,6 +40,16 @@ export interface VibeApp {
   profitMargin?: number;
   isAnonymous?: boolean;
   boostTier?: 'Free' | 'Pro' | 'Elite';
+  marketplaceAssetId?: string;
+  valuationMultipleX100?: number | null;
+  marketplaceVerifiedStatus?: 'unverified' | 'pending' | 'verified' | 'error';
+  isOwnerListing?: boolean;
+  publishSource?: 'start-jam' | 'list-app';
+  publishToMarketplace?: boolean;
+  marketplaceAskingPriceUsd?: string;
+  marketplaceVisibility?: MarketplaceVisibility;
+  marketplaceBoostTierId?: MarketplaceBoostTier;
+  websiteUrl?: string;
 }
 
 export interface MarketItem {
@@ -223,4 +233,314 @@ export interface CanvasSessionResponse {
 
 export interface CanvasPublicSessionResponse {
   session: CanvasDashboardSession | null;
+}
+
+export type MarketplaceVisibility = 'public' | 'members_only' | 'private';
+export type MarketplaceVerifiedStatus = 'unverified' | 'pending' | 'verified' | 'error';
+export type MarketplaceProvider = 'stripe' | 'lemonsqueezy' | 'polar' | 'dodo' | 'revenuecat';
+export type MarketplaceBoostTier = 'free' | 'pro' | 'elite';
+
+export interface MarketplaceAssetCard {
+  id: string;
+  marketplaceAssetId?: string;
+  slug: string;
+  name: string;
+  tagline: string;
+  logoUrl?: string | null;
+  category: string;
+  subcategory?: string | null;
+  techStack: string[];
+  askingPriceCents: number;
+  currency: string;
+  verifiedStatus: MarketplaceVerifiedStatus;
+  visibility: MarketplaceVisibility;
+  isAnonymous: boolean;
+  mrrCents: number;
+  last30dRevenueCents: number;
+  last30dGrowthBps: number;
+  activeSubscribers?: number;
+  churnBps?: number | null;
+  metricsProvider?: MarketplaceProvider | null;
+  profitMarginPercent: number | null;
+  valuationMultipleX100: number | null;
+  metricsUpdatedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isOwner?: boolean;
+}
+
+export interface MarketplaceAssetOfferSummary {
+  total: number;
+  sent: number;
+  viewed: number;
+  accepted: number;
+  rejected: number;
+  countered: number;
+}
+
+export interface MarketplaceOwnerAsset extends MarketplaceAssetCard {
+  offers: MarketplaceAssetOfferSummary;
+  offerItems?: MarketplaceOfferItem[];
+}
+
+export interface MarketplaceOfferItem {
+  id: string;
+  assetId: string;
+  buyerUserId: string;
+  buyerLabel: string;
+  offerPriceCents: number;
+  message: string;
+  status: 'sent' | 'viewed' | 'accepted' | 'rejected' | 'countered';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MarketplaceAssetDetail extends MarketplaceAssetCard {
+  description: string;
+  founder: { name: string; email?: string } | null;
+  sparkline: Array<{
+    periodEnd: string;
+    revenueCents: number;
+    mrrCents: number;
+  }>;
+  boost?: {
+    tier: MarketplaceBoostTier;
+    starts_at: string;
+    ends_at: string | null;
+  } | null;
+}
+
+export interface MarketplaceAssetsResponse {
+  items: MarketplaceAssetCard[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  meta: {
+    requiresMembership: boolean;
+    lockedCount: number;
+  };
+}
+
+export interface MarketplaceAssetDetailResponse {
+  locked: boolean;
+  reason?: 'membership_required' | 'private_asset';
+  asset: MarketplaceAssetDetail | MarketplaceAssetCard;
+}
+
+export interface MarketplaceMyAssetsResponse {
+  items: MarketplaceOwnerAsset[];
+}
+
+export interface MarketplaceListingUpdateInput {
+  name?: string;
+  tagline?: string;
+  description?: string;
+  logoUrl?: string;
+  category?: string;
+  subcategory?: string;
+  techStack?: string[];
+  founderName?: string;
+  founderEmail?: string;
+  askingPriceUsd?: string;
+  askingPriceCents?: number;
+  profitMarginPercent?: number | null;
+  isAnonymous?: boolean;
+  visibility?: MarketplaceVisibility;
+}
+
+export interface MarketplaceAssetDraftInput {
+  name: string;
+  tagline: string;
+  description: string;
+  logoUrl?: string;
+  category: string;
+  subcategory?: string;
+  techStack?: string[];
+  founderName: string;
+  founderEmail: string;
+  isAnonymous?: boolean;
+  visibility?: MarketplaceVisibility;
+  jamId?: string;
+}
+
+export interface MarketplaceConnectInput {
+  provider: MarketplaceProvider;
+  apiKey: string;
+  isAnonymous?: boolean;
+}
+
+export interface MarketplaceConnectResponse {
+  connection: unknown;
+  verifiedStatus: MarketplaceVerifiedStatus | 'pending';
+  warning?: string;
+  metrics?: {
+    mrrCents: number;
+    last30dRevenueCents: number;
+    last30dGrowthBps: number;
+    activeSubscribers: number;
+  } | null;
+}
+
+export interface MarketplacePublishInput {
+  askingPriceUsd?: string;
+  askingPriceCents?: number;
+  profitMarginPercent?: number | null;
+  tier: MarketplaceBoostTier;
+  visibility?: MarketplaceVisibility;
+  boostCheckoutSessionId?: string;
+}
+
+export interface MarketplacePublishSuccessResponse {
+  success: true;
+  assetId: string;
+  slug: string;
+  askingPriceCents: number;
+  valuationMultipleX100: number | null;
+  tier: string;
+  visibility: string;
+  verifiedStatus: MarketplaceVerifiedStatus;
+  mrrCents: number;
+  last30dRevenueCents: number;
+  last30dGrowthBps: number;
+}
+
+export interface MarketplacePublishPaymentRequiredResponse {
+  success: false;
+  requiresPayment: true;
+  tier: MarketplaceBoostTier;
+  boostCheckoutSessionId: string;
+  checkoutUrl: string;
+  paymentStatus: string;
+}
+
+export interface MarketplaceOfferInput {
+  assetId: string;
+  offerPriceUsd?: string;
+  offerPriceCents?: number;
+  message: string;
+}
+
+export interface MarketplaceOfferResponse {
+  offer: unknown;
+  emailStatus: 'sent' | 'skipped' | 'failed';
+  emailMessageId?: string | null;
+  inboxStatus?: 'created' | 'skipped' | 'failed';
+  conversationId?: string | null;
+  pipelineStage?: AcquireStage;
+}
+
+export type AcquireStage =
+  | 'WATCHLISTED'
+  | 'OFFER_SENT'
+  | 'LOI_SIGNED'
+  | 'DUE_DILIGENCE'
+  | 'APA_SIGNED'
+  | 'ESCROW_FUNDED'
+  | 'CLOSED';
+
+export interface ProfileMarketplaceSummary {
+  roles: {
+    seller: boolean;
+    buyer: boolean;
+    buyerEnabled: boolean;
+  };
+  stats: {
+    activeListingsCount: number;
+    listingsCount: number;
+    portfolioValueCents: number;
+    offersCount: number;
+    pipelineCount: number;
+    wishlistCount: number;
+    conversationsCount: number;
+    unreadInboxCount: number;
+  };
+}
+
+export interface InboxConversationSummary {
+  id: string;
+  listingId: string | null;
+  listingName: string;
+  counterpartId: string;
+  counterpartName: string;
+  counterpartAvatarUrl?: string | null;
+  lastMessagePreview: string;
+  lastMessageAt: string;
+  unreadCount: number;
+}
+
+export interface InboxMessage {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
+  isMine: boolean;
+}
+
+export interface InboxConversationDetail {
+  id: string;
+  listingId: string | null;
+  listingName: string;
+  counterpartId: string;
+  counterpartName: string;
+  counterpartAvatarUrl?: string | null;
+  lastMessageAt: string;
+}
+
+export interface InboxMessagesResponse {
+  conversation: InboxConversationDetail;
+  messages: InboxMessage[];
+}
+
+export interface InboxSendMessageResponse {
+  message: InboxMessage;
+  conversationId?: string;
+  legacy?: boolean;
+}
+
+export interface AcquirePipelineListing {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string;
+  category: string;
+  askingPriceCents: number;
+  mrrCents: number;
+  last30dRevenueCents: number;
+  verifiedStatus: MarketplaceVerifiedStatus;
+  isAnonymous: boolean;
+  founderName: string;
+}
+
+export interface AcquirePipelineItem {
+  id: string;
+  listingId: string;
+  stage: AcquireStage;
+  stageLabel: string;
+  notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastActivityAt: string;
+  conversationId: string | null;
+  listing: AcquirePipelineListing;
+}
+
+export interface AcquirePipelineStageSummary {
+  stage: AcquireStage;
+  label: string;
+  count: number;
+}
+
+export interface AcquirePipelineResponse {
+  items: AcquirePipelineItem[];
+  stages: AcquirePipelineStageSummary[];
+}
+
+export interface WishlistListingItem {
+  id: string;
+  listingId: string;
+  createdAt: string;
+  listing: AcquirePipelineListing;
 }
