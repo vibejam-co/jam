@@ -7,6 +7,8 @@ import type {
   MarketplaceAssetDetailResponse,
   MarketplaceAssetDraftInput,
   MarketplaceAssetsResponse,
+  MarketplaceBuyerAlertInput,
+  MarketplaceBuyerAlertResponse,
   MarketplaceListingUpdateInput,
   MarketplaceOfferResponse,
   MarketplaceMyAssetsResponse,
@@ -19,10 +21,17 @@ import type {
   WishlistListingItem,
   MarketplaceConnectResponse,
   MarketplaceConnectInput,
+  MarketplaceAssetFinancialsInput,
+  MarketplaceAssetFinancialsResponse,
+  MarketplaceAssetTrafficInput,
+  MarketplaceAssetTrafficResponse,
   MarketplaceOfferInput,
   MarketplacePublishPaymentRequiredResponse,
   MarketplacePublishSuccessResponse,
   MarketplacePublishInput,
+  DealRoomResponse,
+  DealEscrowCreateResponse,
+  DealRoomStatus,
   Notification,
   VibeApp,
 } from '../types';
@@ -111,6 +120,9 @@ export const fetchMarketplaceAssets = (params?: {
   max_price?: number;
   min_rev30?: number;
   max_multiple?: number;
+  minProfitMarginBps?: number;
+  maxChurnBps?: number;
+  minTraffic?: number;
   verified_only?: boolean;
   sort?: 'latest' | 'mrr' | 'rev30' | 'multiple';
   page?: number;
@@ -132,6 +144,12 @@ export const fetchMarketplaceAssets = (params?: {
 export const fetchMarketplaceAssetDetail = (idOrSlug: string) =>
   request<MarketplaceAssetDetailResponse>(`/api/marketplace/assets?assetId=${encodeURIComponent(idOrSlug)}`);
 
+export const createMarketplaceBuyerAlert = (payload: MarketplaceBuyerAlertInput) =>
+  request<MarketplaceBuyerAlertResponse>('/api/marketplace/alerts', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
 export const updateMarketplaceAsset = (
   idOrSlug: string,
   payload: MarketplaceListingUpdateInput,
@@ -140,6 +158,40 @@ export const updateMarketplaceAsset = (
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
+
+export const updateMarketplaceAssetFinancials = (
+  assetId: string,
+  payload: MarketplaceAssetFinancialsInput,
+) =>
+  request<MarketplaceAssetFinancialsResponse>(
+    `/api/marketplace/assets/${encodeURIComponent(assetId)}/financials`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
+
+export const fetchMarketplaceAssetFinancials = (assetId: string) =>
+  request<MarketplaceAssetFinancialsResponse>(
+    `/api/marketplace/assets/${encodeURIComponent(assetId)}/financials`,
+  );
+
+export const updateMarketplaceAssetTraffic = (
+  assetId: string,
+  payload: MarketplaceAssetTrafficInput,
+) =>
+  request<MarketplaceAssetTrafficResponse>(
+    `/api/marketplace/assets/${encodeURIComponent(assetId)}/traffic`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
+
+export const fetchMarketplaceAssetTraffic = (assetId: string) =>
+  request<MarketplaceAssetTrafficResponse>(
+    `/api/marketplace/assets/${encodeURIComponent(assetId)}/traffic`,
+  );
 
 export const deleteMarketplaceAsset = (idOrSlug: string) =>
   request<{ deleted: boolean; assetId: string }>(
@@ -177,6 +229,20 @@ export const submitMarketplaceOffer = (payload: MarketplaceOfferInput) =>
   request<MarketplaceOfferResponse>('/api/marketplace/offers', {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+
+export const fetchDealRoom = (offerId: string) =>
+  request<DealRoomResponse>(`/api/marketplace/deals/${encodeURIComponent(offerId)}`);
+
+export const updateDealRoomStatus = (offerId: string, newStatus: DealRoomStatus) =>
+  request<DealRoomResponse>(`/api/marketplace/deals/${encodeURIComponent(offerId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ newStatus }),
+  });
+
+export const initiateDealRoomEscrow = (offerId: string) =>
+  request<DealEscrowCreateResponse>(`/api/marketplace/deals/${encodeURIComponent(offerId)}/escrow`, {
+    method: 'POST',
   });
 
 export const fetchMyMarketplaceAssets = (options?: {

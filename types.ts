@@ -247,6 +247,7 @@ export interface MarketplaceAssetCard {
   name: string;
   tagline: string;
   logoUrl?: string | null;
+  websiteUrl?: string | null;
   category: string;
   subcategory?: string | null;
   techStack: string[];
@@ -258,6 +259,9 @@ export interface MarketplaceAssetCard {
   mrrCents: number;
   last30dRevenueCents: number;
   last30dGrowthBps: number;
+  profitMarginBps?: number | null;
+  monthlyUniqueVisitors?: number;
+  analyticsProofUrl?: string | null;
   activeSubscribers?: number;
   churnBps?: number | null;
   metricsProvider?: MarketplaceProvider | null;
@@ -322,6 +326,26 @@ export interface MarketplaceAssetsResponse {
   };
 }
 
+export interface MarketplaceBuyerAlertInput {
+  minMrrCents?: number;
+  maxPriceCents?: number | null;
+  minProfitMarginBps?: number;
+}
+
+export interface MarketplaceBuyerAlert {
+  id: string;
+  email: string;
+  minMrrCents: number;
+  maxPriceCents: number | null;
+  minProfitMarginBps: number;
+  createdAt: string;
+}
+
+export interface MarketplaceBuyerAlertResponse {
+  alert: MarketplaceBuyerAlert;
+  alreadyExisted: boolean;
+}
+
 export interface MarketplaceAssetDetailResponse {
   locked: boolean;
   reason?: 'membership_required' | 'private_asset';
@@ -337,6 +361,7 @@ export interface MarketplaceListingUpdateInput {
   tagline?: string;
   description?: string;
   logoUrl?: string;
+  websiteUrl?: string;
   category?: string;
   subcategory?: string;
   techStack?: string[];
@@ -349,11 +374,38 @@ export interface MarketplaceListingUpdateInput {
   visibility?: MarketplaceVisibility;
 }
 
+export interface MarketplaceAssetFinancialsInput {
+  operatingExpenses: number | string;
+  expenseBreakdown?: string;
+}
+
+export interface MarketplaceAssetFinancialsResponse {
+  assetId: string;
+  mrrCents: number;
+  operatingExpensesCents: number;
+  expenseBreakdown: string;
+  netProfitCents: number;
+  profitMarginBps: number;
+  profitMarginPercent: number;
+}
+
+export interface MarketplaceAssetTrafficInput {
+  monthlyUniqueVisitors: number | string;
+  analyticsProofUrl?: string;
+}
+
+export interface MarketplaceAssetTrafficResponse {
+  assetId: string;
+  monthlyUniqueVisitors: number;
+  analyticsProofUrl: string;
+}
+
 export interface MarketplaceAssetDraftInput {
   name: string;
   tagline: string;
   description: string;
   logoUrl?: string;
+  websiteUrl?: string;
   category: string;
   subcategory?: string;
   techStack?: string[];
@@ -430,6 +482,61 @@ export interface MarketplaceOfferResponse {
   pipelineStage?: AcquireStage;
 }
 
+export type DealRoomStatus =
+  | 'PENDING'
+  | 'ACCEPTED'
+  | 'LOI_SIGNED'
+  | 'DUE_DILIGENCE'
+  | 'APA_SIGNED'
+  | 'ESCROW_FUNDED'
+  | 'ASSETS_TRANSFERRED'
+  | 'CLOSED'
+  | 'REJECTED';
+
+export interface DealRoomData {
+  offerId: string;
+  legacyOfferId: string | null;
+  asset: {
+    id: string;
+    slug: string | null;
+    name: string;
+    tagline: string;
+    mrrCents: number;
+    askingPriceCents: number;
+  };
+  agreedPriceCents: number;
+  initialMessage: string;
+  escrowTransactionId: string | null;
+  escrowStatus: string | null;
+  status: DealRoomStatus;
+  viewerRole: 'buyer' | 'seller';
+  buyer: {
+    id: string;
+    email: string | null;
+  };
+  seller: {
+    id: string;
+    email: string | null;
+  };
+  counterparty: {
+    id: string;
+    email: string | null;
+  };
+  allowedNextStatuses: DealRoomStatus[];
+}
+
+export interface DealRoomResponse {
+  deal: DealRoomData;
+}
+
+export interface DealEscrowCreateResponse {
+  transactionId: string;
+  escrowStatus: string | null;
+  landingPage: string | null;
+  existingTransaction: boolean;
+  deal?: DealRoomData;
+}
+
 export type AcquireStage =
   | 'WATCHLISTED'
   | 'OFFER_SENT'
@@ -487,6 +594,7 @@ export interface InboxConversationDetail {
   counterpartName: string;
   counterpartAvatarUrl?: string | null;
   lastMessageAt: string;
+  dealOfferId?: string | null;
 }
 
 export interface InboxMessagesResponse {

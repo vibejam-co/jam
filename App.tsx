@@ -19,6 +19,7 @@ import NewsletterSection from './components/NewsletterSection';
 import Footer from './components/Footer';
 import LegalModal from './components/LegalModal';
 import CanvasPublicPage from './components/CanvasPublicPage';
+import DealRoomView from './components/DealRoomView';
 import {
   addWishlistItem,
   createMarketplaceAssetDraft,
@@ -49,6 +50,17 @@ const ALL_CATEGORIES = [
 
 const RESERVED_PUBLIC_PATHS = new Set(['', 'rankings', 'marketplace', 'canvas']);
 
+const isImageIconSource = (value: string | undefined | null): boolean => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return (
+    normalized.startsWith('data:image/')
+    || normalized.startsWith('https://')
+    || normalized.startsWith('http://')
+    || normalized.startsWith('blob:')
+    || normalized.startsWith('/')
+  );
+};
+
 const getPublicSlugFromPath = (): string | null => {
   if (typeof window === 'undefined') {
     return null;
@@ -65,7 +77,21 @@ const getPublicSlugFromPath = (): string | null => {
   return cleaned;
 };
 
+const getDealRoomOfferIdFromPath = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const match = (window.location.pathname || '').match(/^\/deal-room\/([^/?#]+)$/i);
+  if (!match || !match[1]) {
+    return null;
+  }
+
+  return decodeURIComponent(match[1]).trim() || null;
+};
+
 const App: React.FC = () => {
+  const [dealRoomOfferId] = useState<string | null>(() => getDealRoomOfferIdFromPath());
   const [publicSlug] = useState<string | null>(() => getPublicSlugFromPath());
   const [activeTab, setActiveTab] = useState<'Rankings' | 'Marketplace' | 'Canvas'>('Rankings');
   const [filter, setFilter] = useState<string>('All');
@@ -387,6 +413,7 @@ const App: React.FC = () => {
             name: publishedApp.name,
             tagline: publishedApp.pitch || `${publishedApp.name} is now open for acquisition.`,
             description: publishedApp.solution || publishedApp.pitch || `${publishedApp.name} is now open for acquisition.`,
+            logoUrl: isImageIconSource(publishedApp.icon) ? publishedApp.icon : undefined,
             category: publishedApp.category,
             founderName: publishedApp.founder.name,
             founderEmail,
@@ -520,6 +547,21 @@ const App: React.FC = () => {
     setActiveTab('Marketplace');
     setProfileFocusConversationId(quickInboxThreads[0]?.id ?? null);
   };
+
+  if (dealRoomOfferId) {
+    return (
+      <>
+        <DealRoomView
+          offerId={dealRoomOfferId}
+          authUserId={authUser?.id ?? null}
+          onRequireAuth={() => setIsAuthOpen(true)}
+        />
+        <AnimatePresence>
+          {isAuthOpen && <AuthModal onClose={() => setIsAuthOpen(false)} />}
+        </AnimatePresence>
+      </>
+    );
+  }
 
   if (publicSlug) {
     return <CanvasPublicPage slug={publicSlug} />;
@@ -781,7 +823,11 @@ const App: React.FC = () => {
                     )}
                   </div>
                 </section>
-                <MarketRail apps={apps} onViewAllMarketplace={() => setActiveTab('Marketplace')} />
+                <MarketRail
+                  apps={apps}
+                  onViewAllMarketplace={() => setActiveTab('Marketplace')}
+                  onSelectApp={(app) => setSelectedApp(app)}
+                />
               </div>
 
               {/* Newsletter Feature */}

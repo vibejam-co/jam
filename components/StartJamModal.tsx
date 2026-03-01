@@ -47,6 +47,7 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [providerApiKey, setProviderApiKey] = useState('');
+  const [iconUploadError, setIconUploadError] = useState<string | null>(null);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -78,6 +79,53 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
   const marketplaceReady = !formData.publishToMarketplace
     || (founderEmailValid && (formData.marketplaceAskingPrice.trim().length > 0 || formData.monthlyRevenue > 0));
 
+  const isImageIconSource = (value: string): boolean => {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return (
+      normalized.startsWith('data:image/')
+      || normalized.startsWith('https://')
+      || normalized.startsWith('http://')
+      || normalized.startsWith('blob:')
+      || normalized.startsWith('/')
+    );
+  };
+
+  const handleIconFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setIconUploadError('Please upload an image file (PNG, JPG, WEBP, or SVG).');
+      event.target.value = '';
+      return;
+    }
+
+    const maxBytes = 3 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      setIconUploadError('Icon is too large. Please keep it under 3MB.');
+      event.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      if (!result.startsWith('data:image/')) {
+        setIconUploadError('Unable to process this image. Try another file.');
+        return;
+      }
+      setIconUploadError(null);
+      setFormData((prev) => ({ ...prev, icon: result }));
+    };
+    reader.onerror = () => {
+      setIconUploadError('Unable to read this file. Try again.');
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
   const nextStep = () => setStep(s => s + 1);
   const prevStep = () => setStep(s => s - 1);
 
@@ -94,7 +142,7 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
       rank: 'NEW',
       name: formData.name || 'Untitled Project',
       pitch: formData.pitch || 'A new vibe-coded masterpiece.',
-      icon: formData.icon,
+      icon: formData.icon.trim() || '✨',
       accentColor: '124, 58, 237',
       monthlyRevenue: formData.monthlyRevenue,
       lifetimeRevenue: formData.monthlyRevenue * 12, // Simple mock
@@ -200,19 +248,55 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
                     onClick={() => fileInputRef.current?.click()}
                     className="w-24 h-24 rounded-[24px] bg-white/[0.03] border-2 border-dashed border-white/10 flex flex-col items-center justify-center cursor-pointer hover:border-white/30 transition-all group"
                    >
-                     {formData.icon ? (
+                     {isImageIconSource(formData.icon) ? (
+                       <img src={formData.icon} alt="Jam icon preview" className="h-full w-full rounded-[22px] object-cover" />
+                     ) : formData.icon ? (
                        <span className="text-4xl">{formData.icon}</span>
                      ) : (
                        <Upload className="w-6 h-6 text-zinc-500 group-hover:text-white" />
                      )}
                      <input 
                       type="file" 
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
                       className="hidden" 
                       ref={fileInputRef} 
-                      onChange={(e) => setFormData({...formData, icon: '🚀'})} // Mock upload
+                      onChange={handleIconFileChange}
                      />
                    </div>
-                   <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Project Logo or Emoji</p>
+                   <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Project Icon</p>
+                   <input
+                    type="url"
+                    placeholder="Or paste icon URL (https://...)"
+                    value={isImageIconSource(formData.icon) && !formData.icon.startsWith('data:image/') ? formData.icon : ''}
+                    onChange={(e) => {
+                      const nextValue = e.target.value.trim();
+                      setIconUploadError(null);
+                      setFormData((prev) => ({ ...prev, icon: nextValue || '✨' }));
+                    }}
+                    className="w-full max-w-md bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-white/30"
+                   />
+                   <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="rounded-full border border-white/15 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-300 hover:border-white/30 hover:text-white transition-all"
+                    >
+                      Upload Icon
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIconUploadError(null);
+                        setFormData((prev) => ({ ...prev, icon: '✨' }));
+                      }}
+                      className="rounded-full border border-white/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-all"
+                    >
+                      Use Default
+                    </button>
+                   </div>
+                   {iconUploadError && (
+                    <p className="text-[11px] text-red-300">{iconUploadError}</p>
+                   )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

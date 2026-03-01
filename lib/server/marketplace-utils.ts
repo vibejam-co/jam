@@ -161,3 +161,41 @@ export const parseBooleanQuery = (value: string | null): boolean | undefined => 
   }
   return undefined;
 };
+
+export const normalizeWebsiteUrl = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)
+    ? trimmed
+    : /^[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i.test(trimmed)
+      ? `https://${trimmed}`
+      : null;
+
+  if (!withProtocol) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+
+    const host = parsed.host.toLowerCase();
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '') || '/';
+    if (normalizedPath === '/') {
+      return `${parsed.protocol}//${host}`;
+    }
+
+    return `${parsed.protocol}//${host}${normalizedPath}`;
+  } catch {
+    return null;
+  }
+};

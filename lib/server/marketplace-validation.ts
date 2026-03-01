@@ -18,6 +18,7 @@ export const CreateMarketplaceAssetDraftSchema = z.object({
   tagline: z.string().trim().min(2).max(220),
   description: z.string().trim().min(10).max(4000).optional().default(''),
   logoUrl: z.string().trim().url().optional().or(z.literal('')).default(''),
+  websiteUrl: z.string().trim().url().optional().or(z.literal('')).default(''),
   category: z.string().trim().min(2).max(80),
   subcategory: z.string().trim().max(80).optional().default(''),
   techStack: z.array(z.string().trim().min(1).max(60)).max(24).optional().default([]),
@@ -55,6 +56,7 @@ export const UpdateMarketplaceAssetSchema = z.object({
   tagline: z.string().trim().min(2).max(220).optional(),
   description: z.string().trim().min(10).max(4000).optional(),
   logoUrl: z.string().trim().url().optional().or(z.literal('')),
+  websiteUrl: z.string().trim().url().optional().or(z.literal('')),
   category: z.string().trim().min(2).max(80).optional(),
   subcategory: z.string().trim().max(80).optional(),
   techStack: z.array(z.string().trim().min(1).max(60)).max(24).optional(),
@@ -74,10 +76,19 @@ export const MarketplaceAssetsQuerySchema = z.object({
   max_price: z.coerce.number().int().min(0).optional(),
   min_rev30: z.coerce.number().int().min(0).optional(),
   max_multiple: z.coerce.number().int().min(0).optional(),
+  minProfitMarginBps: z.coerce.number().int().min(0).max(10_000).optional(),
+  maxChurnBps: z.coerce.number().int().min(0).max(100_000).optional(),
+  minTraffic: z.coerce.number().int().min(0).optional(),
   verified_only: z.coerce.boolean().optional(),
   sort: z.enum(['latest', 'mrr', 'rev30', 'multiple']).optional().default('latest'),
   page: z.coerce.number().int().min(1).optional().default(1),
   pageSize: z.coerce.number().int().min(1).max(48).optional().default(12),
+});
+
+export const CreateBuyerAlertSchema = z.object({
+  minMrrCents: z.number().int().min(0).max(2_000_000_000).optional().default(0),
+  maxPriceCents: z.number().int().min(0).max(2_000_000_000).nullable().optional().default(null),
+  minProfitMarginBps: z.number().int().min(0).max(10_000).optional().default(0),
 });
 
 export const InboxStartConversationSchema = z.object({

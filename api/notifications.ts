@@ -1,7 +1,7 @@
 import { getMethod, methodNotAllowed, sendJson } from '../lib/server/http.js';
 import { getSupabaseAdmin } from '../lib/server/supabase-admin.js';
 import { getAuthenticatedUser } from '../lib/server/auth.js';
-import { isRecoverableSchemaError, sanitizeErrorDetails } from '../lib/server/marketplace-utils.js';
+import { getQueryValue, isRecoverableSchemaError, sanitizeErrorDetails } from '../lib/server/marketplace-utils.js';
 
 const NOTIFICATION_SELECT = [
   'id',
@@ -15,10 +15,53 @@ const NOTIFICATION_SELECT = [
   'created_at',
 ].join(',');
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const parseJsonBody = async (req: any) => {
+  if (!req) {
+    return {};
+  }
+  if (typeof req.body === 'string') {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
+  }
+  if (req.body && typeof req.body === 'object') {
+    return req.body;
+  }
+  if (typeof req.json === 'function') {
+    try {
+      return await req.json();
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
 export default async function handler(req: any, res: any) {
   try {
-    if (getMethod(req) !== 'GET') {
-      return methodNotAllowed(res, ['GET']);
+    const method = getMethod(req);
+    const scope = getQueryValue(req, 'scope');
+
+    if (scope === 'newsletter') {
+      if (method !== 'POST') {
+        return methodNotAllowed(res, ['POST']);
+      }
+
+      const body = await parseJsonBody(req);
+      const email = String(body?.email ?? '').trim().toLowerCase();
+      if (!EMAIL_REGEX.test(email)) {
+        return sendJson(res, 400, { error: 'Please provide a valid email address.' });
+      }
+
+      return sendJson(res, 200, { data: { success: true } });
+    }
+
+    if (method !== 'GET') {
+      return methodNotAllowed(res, ['GET', 'POST']);
     }
 
     const user = await getAuthenticatedUser(req);

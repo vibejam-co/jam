@@ -521,6 +521,7 @@ const buildLegacyInboxMessagePayloadFromOffer = async (supabase: any, userId: st
       counterpartName,
       counterpartAvatarUrl: counterpartProfile.avatarUrl,
       lastMessageAt: offer.updated_at ?? offer.created_at ?? new Date().toISOString(),
+      dealOfferId: String(offer.id),
     },
     messages,
   };
@@ -1029,6 +1030,50 @@ const handleInboxMessages = async (req: any, res: any, user: any, supabase: any)
     counterpartName = listing.founder_name;
   }
 
+  const [domainOfferLookup, legacyOfferLookup] = await Promise.all([
+    conversation.listing_id
+      ? supabase
+          .from('marketplace_offers')
+          .select('id, legacy_offer_id, status, updated_at, created_at')
+          .eq('asset_id', conversation.listing_id)
+          .eq('buyer_user_id', conversation.buyer_id)
+          .eq('seller_user_id', conversation.seller_id)
+          .order('updated_at', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    conversation.listing_id
+      ? supabase
+          .from('offers')
+          .select('id, status, updated_at, created_at')
+          .eq('asset_id', conversation.listing_id)
+          .eq('buyer_user_id', conversation.buyer_id)
+          .eq('seller_user_id', conversation.seller_id)
+          .order('updated_at', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  if (domainOfferLookup.error && !isRecoverableSchemaError(domainOfferLookup.error)) {
+    throw domainOfferLookup.error;
+  }
+  if (legacyOfferLookup.error && !isRecoverableSchemaError(legacyOfferLookup.error)) {
+    throw legacyOfferLookup.error;
+  }
+
+  const domainOffer = domainOfferLookup.data ?? null;
+  const legacyOffer = legacyOfferLookup.data ?? null;
+  const dealOfferId = domainOffer?.id
+    ? String(domainOffer.id)
+    : legacyOffer?.id
+      ? String(legacyOffer.id)
+      : domainOffer?.legacy_offer_id
+        ? String(domainOffer.legacy_offer_id)
+        : null;
+
   const messageRows = Array.isArray(messages) ? messages : [];
   const hasUnreadIncoming = messageRows.some((message) => message.sender_id !== user.id && !message.read_at);
   if (hasUnreadIncoming) {
@@ -1050,6 +1095,7 @@ const handleInboxMessages = async (req: any, res: any, user: any, supabase: any)
         counterpartName,
         counterpartAvatarUrl: counterpartProfile.avatarUrl,
         lastMessageAt: conversation.last_message_at ?? conversation.created_at,
+        dealOfferId,
       },
       messages: messageRows.map((message) => ({
         id: message.id,

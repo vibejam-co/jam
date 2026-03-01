@@ -8,11 +8,13 @@ import {
   Sparkles,
   ChevronRight,
   Plus,
-  Filter,
 } from 'lucide-react';
 import { VibeApp, MarketplaceAssetCard } from '../types';
 import GemstoneIcon from './GemstoneIcon';
-import { fetchMarketplaceAssets } from '../lib/api';
+import ProfitMarginBadge from './ProfitMarginBadge';
+import TrafficBadge from './TrafficBadge';
+import { createMarketplaceBuyerAlert, fetchMarketplaceAssets } from '../lib/api';
+import MarketplaceFilters, { ChurnFilterOption } from './MarketplaceFilters';
 
 interface MarketplaceViewProps {
   apps: VibeApp[];
@@ -22,6 +24,13 @@ interface MarketplaceViewProps {
 }
 
 type SortMode = 'latest' | 'mrr' | 'rev30' | 'multiple';
+
+const churnOptionToBps = (option: ChurnFilterOption): number | undefined => {
+  if (option === 'lt5') return 500;
+  if (option === 'lt10') return 1000;
+  if (option === 'lt20') return 2000;
+  return undefined;
+};
 
 const formatCurrencyCompact = (cents: number): string => {
   const dollars = (cents || 0) / 100;
@@ -90,6 +99,17 @@ const churnBadgeMeta = (churnBps: number | null | undefined): {
   };
 };
 
+const isIconImageSource = (value: string | null | undefined): boolean => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return (
+    normalized.startsWith('data:image/')
+    || normalized.startsWith('https://')
+    || normalized.startsWith('http://')
+    || normalized.startsWith('blob:')
+    || normalized.startsWith('/')
+  );
+};
+
 const mapAssetToVibeApp = (asset: MarketplaceAssetCard): VibeApp => {
   const mrrDollars = Math.round(asset.mrrCents / 100);
   const rev30Dollars = Math.round(asset.last30dRevenueCents / 100);
@@ -104,7 +124,7 @@ const mapAssetToVibeApp = (asset: MarketplaceAssetCard): VibeApp => {
     rank: 'MK',
     name: asset.name,
     pitch: asset.tagline,
-    icon: '💎',
+    icon: isIconImageSource(asset.logoUrl) ? String(asset.logoUrl) : '💎',
     accentColor: '212, 175, 55',
     monthlyRevenue: mrrDollars,
     lifetimeRevenue: Math.max(rev30Dollars * 12, mrrDollars * 12),
@@ -148,7 +168,7 @@ const mapFallbackApps = (apps: VibeApp[]): MarketplaceAssetCard[] =>
       slug: (app.name || `asset-${index}`).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       name: app.name,
       tagline: app.pitch,
-      logoUrl: null,
+      logoUrl: isIconImageSource(app.icon) ? app.icon : null,
       category: app.category,
       subcategory: null,
       techStack: app.techStack,
@@ -160,10 +180,16 @@ const mapFallbackApps = (apps: VibeApp[]): MarketplaceAssetCard[] =>
       mrrCents: Math.max(0, Math.round(app.monthlyRevenue * 100)),
       last30dRevenueCents: Math.max(0, Math.round(app.monthlyRevenue * 100)),
       last30dGrowthBps: Math.round((app.growth || 0) * 100),
+      monthlyUniqueVisitors: Math.max(0, Math.round(Number(app.activeUsers ?? 0))),
+      analyticsProofUrl: null,
       activeSubscribers: 0,
       churnBps: null,
       metricsProvider: null,
       profitMarginPercent: app.profitMargin ?? null,
+      profitMarginBps:
+        typeof app.profitMargin === 'number' && Number.isFinite(app.profitMargin)
+          ? Math.round(app.profitMargin * 100)
+          : null,
       valuationMultipleX100: app.valuationMultipleX100 ?? null,
       metricsUpdatedAt: null,
       createdAt: new Date().toISOString(),
@@ -199,8 +225,16 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   const [category, setCategory] = useState<string>('All');
   const [minMrr, setMinMrr] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
+  const [minProfitMarginPct, setMinProfitMarginPct] = useState(0);
+  const [maxChurnOption, setMaxChurnOption] = useState<ChurnFilterOption>('any');
+  const [minTraffic, setMinTraffic] = useState('');
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
+  const [isCreatingAlert, setIsCreatingAlert] = useState(false);
+  const [alertToast, setAlertToast] = useState<{
+    kind: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const fallbackAssets = useMemo(() => mapFallbackApps(apps), [apps]);
   const categories = useMemo(() => {
@@ -218,6 +252,9 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
     setError(null);
 
     try {
+      const minProfitMarginBps = Math.max(0, Math.round(minProfitMarginPct * 100));
+      const maxChurnBps = churnOptionToBps(maxChurnOption);
+      const minTrafficCount = minTraffic ? Number(minTraffic) : undefined;
       const response = await fetchMarketplaceAssets({
         page: nextPage,
         pageSize: 12,
@@ -226,6 +263,12 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
         verified_only: verifiedOnly,
         min_mrr: minMrr ? Number(minMrr) : undefined,
         max_price: maxPrice ? Number(maxPrice) : undefined,
+        minProfitMarginBps: minProfitMarginBps > 0 ? minProfitMarginBps : undefined,
+        maxChurnBps,
+        minTraffic:
+          typeof minTrafficCount === 'number' && Number.isFinite(minTrafficCount) && minTrafficCount > 0
+            ? Math.round(minTrafficCount)
+            : undefined,
       });
 
       const incoming = response.items || [];
@@ -246,9 +289,15 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
   };
 
   useEffect(() => {
-    loadAssets(1, false);
+    const timeout = window.setTimeout(() => {
+      void loadAssets(1, false);
+    }, 280);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortMode, verifiedOnly, category, minMrr, maxPrice]);
+  }, [sortMode, verifiedOnly, category, minMrr, maxPrice, minProfitMarginPct, maxChurnOption, minTraffic]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -262,6 +311,11 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
       setVerifiedOnly(false);
       setSortMode('latest');
       setCategory('All');
+      setMinMrr('');
+      setMaxPrice('');
+      setMinProfitMarginPct(0);
+      setMaxChurnOption('any');
+      setMinTraffic('');
       setPage(1);
       loadAssets(1, false);
     };
@@ -273,7 +327,7 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
       window.removeEventListener('marketplace:listing-published', handleListingPublished as EventListener);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortMode, verifiedOnly, category, minMrr, maxPrice]);
+  }, [sortMode, verifiedOnly, category, minMrr, maxPrice, minProfitMarginPct, maxChurnOption, minTraffic]);
 
   const visibleAssets = useMemo(() => {
     const seeded = [...assets];
@@ -283,6 +337,9 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
 
     const minMrrCents = minMrr ? Number(minMrr) * 100 : null;
     const maxPriceCents = maxPrice ? Number(maxPrice) * 100 : null;
+    const minTrafficCount = minTraffic ? Number(minTraffic) : null;
+    const minProfitMarginBps = Math.max(0, Math.round(minProfitMarginPct * 100));
+    const maxChurnBps = churnOptionToBps(maxChurnOption);
 
     for (const fallback of fallbackAssets) {
       if (category !== 'All' && normalizeToken(fallback.category) !== normalizeToken(category)) {
@@ -297,6 +354,30 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
       if (typeof maxPriceCents === 'number' && Number.isFinite(maxPriceCents) && fallback.askingPriceCents > maxPriceCents) {
         continue;
       }
+      if (typeof minTrafficCount === 'number' && Number.isFinite(minTrafficCount) && minTrafficCount > 0) {
+        const visitors = Math.max(0, Number(fallback.monthlyUniqueVisitors ?? 0));
+        if (visitors < minTrafficCount) {
+          continue;
+        }
+      }
+      if (minProfitMarginBps > 0) {
+        const marginBps =
+          typeof fallback.profitMarginBps === 'number' && Number.isFinite(fallback.profitMarginBps)
+            ? Math.round(fallback.profitMarginBps)
+            : null;
+        if (marginBps === null || marginBps < minProfitMarginBps) {
+          continue;
+        }
+      }
+      if (typeof maxChurnBps === 'number') {
+        const churnBps =
+          typeof fallback.churnBps === 'number' && Number.isFinite(fallback.churnBps)
+            ? Math.round(fallback.churnBps)
+            : null;
+        if (churnBps === null || churnBps > maxChurnBps) {
+          continue;
+        }
+      }
 
       const key = `${normalizeToken(fallback.name)}::${normalizeToken(fallback.category)}`;
       if (seen.has(key)) {
@@ -308,7 +389,7 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
     }
 
     return seeded;
-  }, [assets, fallbackAssets, category, verifiedOnly, minMrr, maxPrice]);
+  }, [assets, fallbackAssets, category, verifiedOnly, minMrr, maxPrice, minTraffic, minProfitMarginPct, maxChurnOption]);
 
   const lockedPlaceholders = useMemo(() => {
     if (!requiresMembership || lockedCount <= 0) {
@@ -321,6 +402,132 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
       isLocked: true as const,
     }));
   }, [lockedCount, requiresMembership]);
+
+  const activeFilterPills = useMemo(() => {
+    const pills: Array<{ key: string; label: string; onClear: () => void }> = [];
+
+    if (category !== 'All') {
+      pills.push({
+        key: 'category',
+        label: `Category: ${category}`,
+        onClear: () => setCategory('All'),
+      });
+    }
+    if (verifiedOnly) {
+      pills.push({
+        key: 'verified',
+        label: 'Verified Only',
+        onClear: () => setVerifiedOnly(false),
+      });
+    }
+    if (minMrr) {
+      pills.push({
+        key: 'min-mrr',
+        label: `Min MRR: $${Number(minMrr || 0).toLocaleString('en-US')}`,
+        onClear: () => setMinMrr(''),
+      });
+    }
+    if (maxPrice) {
+      pills.push({
+        key: 'max-price',
+        label: `Max Price: $${Number(maxPrice || 0).toLocaleString('en-US')}`,
+        onClear: () => setMaxPrice(''),
+      });
+    }
+    if (minProfitMarginPct > 0) {
+      pills.push({
+        key: 'min-margin',
+        label: `Profit Margin >= ${minProfitMarginPct}%`,
+        onClear: () => setMinProfitMarginPct(0),
+      });
+    }
+    if (maxChurnOption !== 'any') {
+      const label =
+        maxChurnOption === 'lt5' ? 'Churn < 5%' : maxChurnOption === 'lt10' ? 'Churn < 10%' : 'Churn < 20%';
+      pills.push({
+        key: 'max-churn',
+        label,
+        onClear: () => setMaxChurnOption('any'),
+      });
+    }
+    if (minTraffic) {
+      pills.push({
+        key: 'min-traffic',
+        label: `Traffic >= ${Number(minTraffic || 0).toLocaleString('en-US')}/mo`,
+        onClear: () => setMinTraffic(''),
+      });
+    }
+    if (sortMode !== 'latest') {
+      const label = sortMode === 'mrr' ? 'Sort: Top MRR' : sortMode === 'rev30' ? 'Sort: Top 30D Rev' : 'Sort: Lowest Multiple';
+      pills.push({
+        key: 'sort',
+        label,
+        onClear: () => setSortMode('latest'),
+      });
+    }
+
+    return pills;
+  }, [category, maxChurnOption, maxPrice, minMrr, minProfitMarginPct, minTraffic, sortMode, verifiedOnly]);
+
+  const handleResetAllFilters = () => {
+    setCategory('All');
+    setVerifiedOnly(false);
+    setSortMode('latest');
+    setMinMrr('');
+    setMaxPrice('');
+    setMinProfitMarginPct(0);
+    setMaxChurnOption('any');
+    setMinTraffic('');
+  };
+
+  const handleCreateAlertForSearch = async () => {
+    setIsCreatingAlert(true);
+    setAlertToast(null);
+
+    try {
+      const minMrrCents = minMrr ? Math.max(0, Math.round(Number(minMrr) * 100)) : 0;
+      const maxPriceCents = maxPrice ? Math.max(0, Math.round(Number(maxPrice) * 100)) : null;
+      const minProfitMarginBps = Math.max(0, Math.round(minProfitMarginPct * 100));
+
+      const response = await createMarketplaceBuyerAlert({
+        minMrrCents,
+        maxPriceCents,
+        minProfitMarginBps,
+      });
+
+      setAlertToast({
+        kind: 'success',
+        message: response.alreadyExisted
+          ? 'Alert already active for this search.'
+          : 'Alert active. You will get an email when matching deals go live.',
+      });
+    } catch (nextError) {
+      const rawMessage = nextError instanceof Error ? nextError.message : 'Unable to create alert right now.';
+      const message = rawMessage.toLowerCase().includes('authentication')
+        ? 'Sign in to create buyer alerts for your search.'
+        : rawMessage;
+      setAlertToast({
+        kind: 'error',
+        message,
+      });
+    } finally {
+      setIsCreatingAlert(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!alertToast) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setAlertToast(null);
+    }, 3500);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [alertToast]);
 
   return (
     <div className="space-y-12">
@@ -366,74 +573,42 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
         </div>
       </header>
 
-      <section className="rounded-3xl border border-white/10 bg-white/[0.02] px-4 py-4 sm:px-6 flex flex-col gap-4">
-        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
-          <Filter className="w-3.5 h-3.5" />
-          Marketplace Filters
+      <MarketplaceFilters
+        categories={categories}
+        category={category}
+        onCategoryChange={setCategory}
+        verifiedOnly={verifiedOnly}
+        onToggleVerified={() => setVerifiedOnly((prev) => !prev)}
+        sortMode={sortMode}
+        onSortModeChange={setSortMode}
+        minMrr={minMrr}
+        onMinMrrChange={setMinMrr}
+        maxPrice={maxPrice}
+        onMaxPriceChange={setMaxPrice}
+        minProfitMarginPct={minProfitMarginPct}
+        onMinProfitMarginPctChange={setMinProfitMarginPct}
+        maxChurnOption={maxChurnOption}
+        onMaxChurnOptionChange={setMaxChurnOption}
+        minTraffic={minTraffic}
+        onMinTrafficChange={setMinTraffic}
+        onApplyTrafficPreset={(visitors) => setMinTraffic(String(visitors))}
+        onCreateAlertForSearch={handleCreateAlertForSearch}
+        isCreatingAlert={isCreatingAlert}
+        activePills={activeFilterPills}
+        onResetAll={handleResetAllFilters}
+      />
+
+      {alertToast && (
+        <div
+          className={`rounded-2xl border px-4 py-3 text-[11px] font-black uppercase tracking-[0.12em] ${
+            alertToast.kind === 'success'
+              ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-200'
+              : 'border-red-500/35 bg-red-500/10 text-red-200'
+          }`}
+        >
+          {alertToast.kind === 'success' ? '🔔' : '⚠️'} {alertToast.message}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {categories.slice(0, 8).map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setCategory(item)}
-              className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${
-                category === item
-                  ? 'bg-white text-black border-white'
-                  : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/25'
-              }`}
-            >
-              {item}
-            </button>
-          ))}
-
-          <button
-            type="button"
-            onClick={() => setVerifiedOnly((prev) => !prev)}
-            className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${
-              verifiedOnly
-                ? 'bg-yellow-500/15 text-[#D4AF37] border-yellow-500/30'
-                : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/25'
-            }`}
-          >
-            Verified Only
-          </button>
-
-          {(['latest', 'mrr', 'rev30', 'multiple'] as const).map((sort) => (
-            <button
-              key={sort}
-              type="button"
-              onClick={() => setSortMode(sort)}
-              className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${
-                sortMode === sort
-                  ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                  : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/25'
-              }`}
-            >
-              {sort === 'latest' ? 'Latest' : sort === 'mrr' ? 'Top MRR' : sort === 'rev30' ? 'Top 30D Rev' : 'Lowest Multiple'}
-            </button>
-          ))}
-
-          <div className="ml-auto flex items-center gap-2">
-            <input
-              type="number"
-              min={0}
-              value={minMrr}
-              onChange={(event) => setMinMrr(event.target.value)}
-              placeholder="Min MRR ($)"
-              className="h-9 w-28 rounded-full bg-black/60 border border-white/10 px-3 text-[10px] font-black uppercase tracking-widest text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-white/25"
-            />
-            <input
-              type="number"
-              min={0}
-              value={maxPrice}
-              onChange={(event) => setMaxPrice(event.target.value)}
-              placeholder="Max Price ($)"
-              className="h-9 w-32 rounded-full bg-black/60 border border-white/10 px-3 text-[10px] font-black uppercase tracking-widest text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-white/25"
-            />
-          </div>
-        </div>
-      </section>
+      )}
 
       {error && (
         <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-5 py-4 text-xs text-yellow-200">
@@ -449,6 +624,7 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
               ? `${(asset.valuationMultipleX100 / 100).toFixed(2)}x`
               : '—';
             const churnMeta = churnBadgeMeta(asset.churnBps);
+            const cardIcon = isIconImageSource(asset.logoUrl) ? String(asset.logoUrl) : '💎';
 
             return (
               <motion.div
@@ -460,7 +636,7 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
                 className="group relative p-6 rounded-[24px] bg-white/[0.02] border border-white/5 transition-all duration-500 flex flex-col h-full hover:border-yellow-500/30 cursor-pointer"
               >
                 <div className="flex justify-between items-start mb-6">
-                  <GemstoneIcon icon="💎" accentColor="212, 175, 55" isHovered={true} />
+                  <GemstoneIcon icon={cardIcon} accentColor="212, 175, 55" isHovered={true} />
                   <div className="text-right space-y-2">
                     <span className="block text-[10px] text-zinc-500 font-black uppercase tracking-widest mb-1">Asking Price</span>
                     <span className="block text-2xl font-mono-data text-[#D4AF37] font-bold tracking-tighter">
@@ -500,6 +676,8 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
                     <span className="px-2 py-0.5 rounded-full border border-white/10 bg-white/5 text-[9px] text-zinc-400 font-bold tracking-widest uppercase">
                       {asset.category}
                     </span>
+                    <TrafficBadge monthlyUniqueVisitors={asset.monthlyUniqueVisitors} />
+                    <ProfitMarginBadge profitMarginBps={asset.profitMarginBps} />
                     <span className={`text-[9px] font-black uppercase tracking-widest ${status.className}`}>
                       {status.label}
                     </span>

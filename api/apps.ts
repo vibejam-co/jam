@@ -42,6 +42,7 @@ const MARKETPLACE_LISTING_SELECT = [
   'jam_id',
   'name',
   'founder_email',
+  'logo_url',
   'asking_price_cents',
   'verified_status',
   'is_listed',
@@ -146,6 +147,7 @@ const loadApps = async (supabase: any) => {
         'jam_id',
         'name',
         'founder_email',
+        'logo_url',
         'asking_price_cents',
         'verified_status',
         'is_listed',
@@ -201,6 +203,17 @@ const loadApps = async (supabase: any) => {
       maximumFractionDigits: 0,
     }).format(Math.max(0, Number(askingPriceCents ?? 0)) / 100);
 
+  const isImageIconSource = (value: string | null | undefined): boolean => {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return (
+      normalized.startsWith('data:image/')
+      || normalized.startsWith('https://')
+      || normalized.startsWith('http://')
+      || normalized.startsWith('blob:')
+      || normalized.startsWith('/')
+    );
+  };
+
   return baseApps.map((app) => {
     const appName = String(app.name ?? '').trim().toLowerCase();
     const founderEmail = String(app.founder?.email ?? '').trim().toLowerCase();
@@ -214,8 +227,12 @@ const loadApps = async (supabase: any) => {
       return app;
     }
 
+    const listingLogo = String((matchedListing as any)?.logo_url ?? '').trim();
+    const resolvedIcon = isImageIconSource(listingLogo) ? listingLogo : app.icon;
+
     return {
       ...app,
+      icon: resolvedIcon,
       isForSale: Boolean(
         (matchedListing as any)?.is_listed === true
         || (matchedListing as any)?.listing_status === 'LISTED'

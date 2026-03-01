@@ -67,74 +67,99 @@ const LegalModal: React.FC<LegalModalProps> = ({ initialTab, onClose }) => {
               >
                 <div className="border-l-2 border-[#D4AF37] pl-6 py-2 mb-12">
                   <h1 className="text-3xl font-extrabold text-white tracking-tighter mb-2">Terms of Service</h1>
-                  <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">Last Updated: October 2026</p>
+                  <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">Last Updated: March 2026</p>
                 </div>
 
                 <div className="space-y-6 text-zinc-400 text-sm leading-relaxed">
-                  <p>Welcome to VibeJam (“the Platform”). By accessing or using our website, services, or tools, you (“the User,” “Founder,” or “Buyer”) agree to be bound by these Terms of Service (“Terms”). If you do not agree to these terms, please do not use the Platform.</p>
+                  <p>Welcome to VibeJam ("the Platform," "we," "our," or "us"). By accessing or using our website, services, Deal Room, or marketplace tools, you ("the User," "Founder," "Seller," or "Buyer") agree to be bound by these Terms of Service ("Terms"). If you do not agree to these terms, you must not use the Platform.</p>
                   
                   <section>
                     <h3 className="text-white font-bold text-lg mb-4">1. Description of Service</h3>
-                    <p>VibeJam provides a marketplace and leaderboard for startups with verified revenue. We facilitate the discovery, verification, and acquisition of digital assets by connecting to third-party payment processors (e.g., Stripe, LemonSqueezy) to display real-time financial data.</p>
+                    <p>VibeJam is a premium marketplace and verification engine for digital assets, micro-SaaS, and mobile applications. We facilitate the discovery, financial verification, and acquisition of these assets by connecting to third-party payment processors (e.g., Stripe, Dodo Payments, RevenueCat) to display real-time, verified financial data, and providing a Deal Room to manage the acquisition pipeline.</p>
                   </section>
 
                   <section>
                     <h3 className="text-white font-bold text-lg mb-4">2. Eligibility & Account Security</h3>
                     <ul className="list-disc pl-5 space-y-2">
-                      <li>Age: You must be at least 18 years old to use this Platform.</li>
-                      <li>Verification: You agree to provide accurate information when connecting your revenue sources.</li>
-                      <li>Responsibility: You are solely responsible for all activity under your account. VibeJam reserves the right to suspend accounts that provide fraudulent data or engage in predatory behavior.</li>
+                      <li>Age Requirement: You must be at least 18 years old and possess the legal authority to form binding contracts to use this Platform.</li>
+                      <li>Data Accuracy: You agree to provide accurate, current, and complete information when connecting your revenue sources, analytics, and personal details.</li>
+                      <li>Account Responsibility: You are solely responsible for all activity under your account. VibeJam reserves the right to suspend or permanently ban accounts that provide fraudulent data, misrepresent assets, or engage in predatory behavior.</li>
                     </ul>
                   </section>
 
                   <section>
-                    <h3 className="text-white font-bold text-lg mb-4">3. Revenue Verification & Data Permissions</h3>
-                    <p>By connecting a third-party API (Stripe, LemonSqueezy, etc.) to VibeJam:</p>
+                    <h3 className="text-white font-bold text-lg mb-4">3. API Security & "Zero-Write" Policy</h3>
+                    <p>Founders must connect third-party APIs to verify revenue. To protect your business, VibeJam enforces strict security protocols:</p>
                     <ul className="list-disc pl-5 space-y-2">
-                      <li>You grant VibeJam a non-exclusive, worldwide license to fetch, store, and publicly display your revenue metrics.</li>
-                      <li>You represent that you have the legal right to share this data.</li>
-                      <li>Accuracy Disclaimer: While VibeJam verifies data via direct API connections, we do not audit the underlying business operations. Buyers are responsible for their own deep-dive due diligence.</li>
+                      <li>Read-Only Requirement: Users must only provide restricted, "Read-Only" API keys (e.g., Stripe rk_live_).</li>
+                      <li>Zero-Write Architecture: VibeJam's architecture is fundamentally incapable of initiating customer charges, issuing refunds, or altering your underlying business data.</li>
+                      <li>Encryption: All API keys are encrypted at rest using bank-grade AES-256-GCM encryption.</li>
+                      <li>User Liability: While VibeJam implements enterprise-grade security, the User remains solely responsible for ensuring the API keys they generate and provide are strictly scoped to Read-Only permissions in their respective payment provider dashboards.</li>
                     </ul>
                   </section>
 
                   <section>
                     <h3 className="text-white font-bold text-lg mb-4">4. Marketplace Fees & Success Commission</h3>
-                    <p>VibeJam operates on a performance-based model to ensure our interests align with our users:</p>
+                    <p>VibeJam operates on a performance and visibility-based model:</p>
                     <ul className="list-disc pl-5 space-y-2">
-                      <li>Success Fee: If a startup listed on VibeJam is acquired, VibeJam is entitled to a 3% commission of the total purchase price, unless otherwise agreed in writing.</li>
-                      <li>Payment: This fee is typically collected automatically through our integrated escrow partners (e.g., Escrow.com).</li>
-                      <li>Listing Boosts: Fees paid for "Pro" or "Premium" visibility are non-refundable and do not guarantee a sale.</li>
+                      <li>The Success Commission: If a startup listed on VibeJam is acquired, VibeJam charges a 3% Success Commission based on the final, total purchase price of the asset.</li>
+                      <li>Escrow Fees Excluded: Our 3% commission is strictly for VibeJam's marketplace facilitation. It does not include third-party escrow transaction fees (e.g., Escrow.com fees), which are separate and typically split 50/50 between the Buyer and Seller.</li>
+                      <li>Paid Boosts: Optional fees paid for "Pro" or "Elite" visibility boosts are charged upfront. These payments are non-refundable and do not guarantee a successful sale.</li>
                     </ul>
                   </section>
 
                   <section>
                     <h3 className="text-white font-bold text-lg mb-4">5. Anti-Circumvention Policy (The "No-Backdoor" Rule)</h3>
-                    <p>To maintain the integrity of our marketplace:</p>
+                    <p>To maintain the integrity of our marketplace and protect our commission structure:</p>
                     <ul className="list-disc pl-5 space-y-2">
-                      <li>Direct Contact: If a Buyer discovers a startup through VibeJam, the Buyer and Seller must conduct the transaction through the VibeJam platform or our designated escrow partner.</li>
-                      <li>Fee Avoidance: Any attempt to bypass the Platform to avoid the 3% success fee is a material breach of these Terms.</li>
-                      <li>Penalty: If a deal is "taken offline" to circumvent fees, VibeJam reserves the right to invoice the Seller for the 3% commission based on the estimated value of the company and permanently ban both parties from the Platform.</li>
+                      <li>Platform Exclusivity: If a Buyer discovers an asset or initiates contact with a Seller through VibeJam, the parties must conduct and close the transaction through the VibeJam platform and our designated escrow partner.</li>
+                      <li>Fee Avoidance: Any attempt to bypass the Platform, communicate off-platform to avoid the 3% Success Commission, or falsely report a deal as "unsold" is a material breach of these Terms.</li>
+                      <li>Penalties: If a transaction is taken offline to circumvent fees, VibeJam reserves the right to immediately invoice the Seller for the 3% commission based on the highest listed Asking Price of the asset, and permanently ban both parties from the Platform.</li>
                     </ul>
                   </section>
 
                   <section>
-                    <h3 className="text-white font-bold text-lg mb-4">6. Role of VibeJam in Acquisitions</h3>
-                    <p>VibeJam is a platform for discovery. We are not a business broker or legal advisor, nor are we a party to any Asset Purchase Agreement (APA) between Buyer and Seller.</p>
+                    <h3 className="text-white font-bold text-lg mb-4">6. Third-Party Payment and Escrow Services</h3>
+                    <p>VibeJam never holds, processes, or manages acquisition funds. All financial transfers between Buyers and Sellers are facilitated by authorized third-party escrow services (e.g., Escrow.com).</p>
+                    <p>By using our Deal Room and initiating an escrow transaction, you agree to the Terms of Service of Escrow.com.</p>
+                    <p>VibeJam holds zero liability for delayed wire transfers, banking fees, escrow disputes, or the final release of funds. Any financial disputes regarding the transfer of capital must be resolved directly between the Buyer, the Seller, and the escrow provider.</p>
                   </section>
 
                   <section>
-                    <h3 className="text-white font-bold text-lg mb-4">7. Intellectual Property</h3>
-                    <p>The VibeJam brand, logo, code, and design are the exclusive property of VibeJam. You retain ownership of your startup's IP, but grant us the right to feature your brand and metrics for marketing purposes.</p>
+                    <h3 className="text-white font-bold text-lg mb-4">7. No Legal or Financial Advice (Templates Disclaimer)</h3>
+                    <p>VibeJam provides sample legal templates within the Deal Room, including Letters of Intent (LOI) and Asset Purchase Agreements (APA), for educational and convenience purposes only.</p>
+                    <p>VibeJam is not a law firm. Providing these documents does not constitute legal, tax, or financial advice.</p>
+                    <p>We strongly recommend that both Buyers and Sellers consult independent legal counsel before signing any agreements. VibeJam assumes no liability for legal disputes, loopholes, or damages arising from the use of our provided templates.</p>
                   </section>
 
                   <section>
-                    <h3 className="text-white font-bold text-lg mb-4">8. Limitation of Liability</h3>
-                    <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, VIBEJAM SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES ARISING OUT OF YOUR USE OF THE PLATFORM.</p>
+                    <h3 className="text-white font-bold text-lg mb-4">8. Role of VibeJam & Due Diligence</h3>
+                    <p>VibeJam is a platform for discovery and data aggregation. We are not a business broker, legal advisor, or a party to any Asset Purchase Agreement (APA) signed between a Buyer and Seller.</p>
+                    <p>Due Diligence: While VibeJam verifies gross revenue via direct API connections, we do not audit the underlying business operations, code quality, or actual profitability. Buyers are entirely responsible for conducting their own comprehensive due diligence prior to funding escrow.</p>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">9. Intellectual Property</h3>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>Platform IP: The VibeJam brand, logo, codebase, algorithms, and UI design are the exclusive property of VibeJam.</li>
+                      <li>User IP: You retain full ownership of your startup's intellectual property. However, by publishing a listing, you grant VibeJam a non-exclusive, royalty-free license to fetch, store, and publicly display your revenue metrics, logos, and public data for marketing purposes (including dynamic social media images and newsletters).</li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">10. Limitation of Liability and Indemnification</h3>
+                    <p>TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, VIBEJAM IS PROVIDED ON AN "AS IS" AND "AS AVAILABLE" BASIS. VIBEJAM SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES, INCLUDING LOST PROFITS, LOST DATA, OR BUSINESS INTERRUPTION, ARISING OUT OF YOUR USE OF THE PLATFORM OR A FAILED ACQUISITION. IN NO EVENT SHALL VIBEJAM'S TOTAL CUMULATIVE LIABILITY EXCEED THE TOTAL FEES PAID BY YOU TO VIBEJAM IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM.</p>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">11. Governing Law and Dispute Resolution</h3>
+                    <p>These Terms and your use of the Platform shall be governed by and construed in accordance with the laws of the United Arab Emirates (UAE), without regard to its conflict of law principles.</p>
+                    <p>Any dispute, controversy, or claim arising out of or relating to these Terms, or the breach thereof, shall be subject to the exclusive jurisdiction of the competent courts located in Dubai, United Arab Emirates.</p>
                   </section>
 
                   <section>
                     <h3 className="text-white font-bold text-lg mb-4">12. Contact Us</h3>
-                    <p>For support, legal inquiries, or to report a completed acquisition, please contact us at: <span className="text-white font-bold">vibejamco@gmail.com</span>.</p>
+                    <p>For support, legal inquiries, API assistance, or to report a completed acquisition, please contact our team at: <span className="text-white font-bold">vibejamco@gmail.com</span>.</p>
                   </section>
                 </div>
               </motion.div>

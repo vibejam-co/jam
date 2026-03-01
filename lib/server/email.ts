@@ -28,6 +28,14 @@ const formatMoney = (cents: number): string =>
 
 const buildInboxUrl = (): string => `${appBaseUrl}/`;
 
+const escapeHtml = (input: string): string =>
+  input
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
 const sendViaResend = async (input: {
   toEmail?: string | null;
   fromEmail: string;
@@ -121,6 +129,57 @@ export const sendInboxMessageNotificationEmail = async (input: {
         <p style="margin:0 0 8px"><strong>${senderLabel}</strong> messaged you about <strong>${listingName}</strong>.</p>
         <p style="margin:0 0 16px">${safeMessage}</p>
         <a href="${inboxUrl}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:600">Open Inbox</a>
+      </div>
+    `,
+  });
+};
+
+export const sendBuyerDealAlertEmail = async (input: {
+  toEmail?: string | null;
+  assetName: string;
+  mrrCents: number;
+  askingPriceCents: number;
+  profitMarginBps?: number | null;
+  dealUrl?: string | null;
+}) => {
+  const assetName = input.assetName.trim() || 'New Marketplace Asset';
+  const mrr = formatMoney(input.mrrCents);
+  const askingPrice = formatMoney(input.askingPriceCents);
+  const marginPercent =
+    typeof input.profitMarginBps === 'number' && Number.isFinite(input.profitMarginBps)
+      ? `${(Math.round(input.profitMarginBps) / 100).toFixed(1)}%`
+      : 'N/A';
+  const dealUrl = input.dealUrl?.trim() || buildInboxUrl();
+
+  return sendViaResend({
+    toEmail: input.toEmail,
+    fromEmail: offersFromEmail,
+    subject: `New Deal Alert: ${assetName}`,
+    text:
+      `New deal alert on VibeJam.\n\n`
+      + `${assetName} is making ${mrr} and listed for ${askingPrice}.\n`
+      + `Profit Margin: ${marginPercent}\n\n`
+      + `View Deal: ${dealUrl}`,
+    html: `
+      <div style="font-family:Inter,Segoe UI,Arial,sans-serif;line-height:1.5;color:#e5e7eb;background:#020617;padding:24px;border-radius:12px">
+        <p style="margin:0 0 10px;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:#22d3ee;font-weight:700">Deal Alert</p>
+        <h2 style="margin:0 0 14px;font-size:26px;line-height:1.2;color:#ffffff">New listing matches your search</h2>
+        <p style="margin:0 0 12px;color:#cbd5e1"><strong>${escapeHtml(assetName)}</strong> was just published on VibeJam.</p>
+        <table style="width:100%;border-collapse:separate;border-spacing:0 8px;margin:0 0 16px">
+          <tr>
+            <td style="font-size:13px;color:#94a3b8">Verified Revenue</td>
+            <td style="font-size:14px;color:#22c55e;font-weight:700;text-align:right">${mrr}/mo</td>
+          </tr>
+          <tr>
+            <td style="font-size:13px;color:#94a3b8">Asking Price</td>
+            <td style="font-size:14px;color:#f8fafc;font-weight:700;text-align:right">${askingPrice}</td>
+          </tr>
+          <tr>
+            <td style="font-size:13px;color:#94a3b8">Profit Margin</td>
+            <td style="font-size:14px;color:#f8fafc;font-weight:700;text-align:right">${marginPercent}</td>
+          </tr>
+        </table>
+        <a href="${dealUrl}" style="display:inline-block;background:#22d3ee;color:#082f49;text-decoration:none;padding:10px 16px;border-radius:999px;font-weight:700">View Deal on VibeJam</a>
       </div>
     `,
   });

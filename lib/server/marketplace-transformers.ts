@@ -7,6 +7,7 @@ type AssetRow = {
   tagline: string;
   description: string;
   logo_url: string | null;
+  website_url?: string | null;
   category: string;
   subcategory: string | null;
   tech_stack: string[] | null;
@@ -21,6 +22,8 @@ type AssetRow = {
   last30d_revenue_cents: number;
   last30d_growth_bps: number;
   mrr_cents: number;
+  monthly_unique_visitors?: number | null;
+  analytics_proof_url?: string | null;
   active_subscribers?: number | null;
   churn_bps?: number | null;
   metrics_provider?: string | null;
@@ -49,6 +52,10 @@ export const toMarketplaceCard = (
   name: row.name,
   tagline: row.tagline,
   logoUrl: row.logo_url,
+  websiteUrl:
+    typeof row.website_url === 'string' && row.website_url.trim()
+      ? row.website_url.trim()
+      : null,
   category: row.category,
   subcategory: row.subcategory,
   techStack: row.tech_stack ?? [],
@@ -60,6 +67,18 @@ export const toMarketplaceCard = (
   mrrCents: row.mrr_cents,
   last30dRevenueCents: row.last30d_revenue_cents,
   last30dGrowthBps: row.last30d_growth_bps,
+  monthlyUniqueVisitors:
+    typeof row.monthly_unique_visitors === 'number' && Number.isFinite(row.monthly_unique_visitors)
+      ? Math.max(0, Math.round(row.monthly_unique_visitors))
+      : 0,
+  analyticsProofUrl:
+    typeof row.analytics_proof_url === 'string' && row.analytics_proof_url.trim()
+      ? row.analytics_proof_url.trim()
+      : null,
+  profitMarginBps:
+    typeof row.profit_margin_bps === 'number' && Number.isFinite(row.profit_margin_bps)
+      ? Math.round(row.profit_margin_bps)
+      : null,
   activeSubscribers:
     typeof row.active_subscribers === 'number' && Number.isFinite(row.active_subscribers)
       ? Math.max(0, Math.round(row.active_subscribers))

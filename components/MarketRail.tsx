@@ -6,36 +6,14 @@ import { VibeApp } from '../types';
 interface MarketRailProps {
   apps: VibeApp[];
   onViewAllMarketplace?: () => void;
+  onSelectApp?: (app: VibeApp) => void;
 }
 
-const MarketRail: React.FC<MarketRailProps> = ({ apps, onViewAllMarketplace }) => {
-  const marketplaceItems = apps
-    .filter((app) => app.isForSale)
-    .slice(0, 3)
-    .map((app) => ({
-      id: app.id,
-      name: app.name,
-      askingPrice: app.askingPrice ?? `$${Math.max(50, Math.round(app.monthlyRevenue * 0.024))}k`,
-      status: 'For Sale' as const,
-    }));
-
-  const fallbackMarketplace = apps.slice(0, 3).map((app) => ({
-    id: app.id,
-    name: app.name,
-    askingPrice: `$${Math.max(50, Math.round(app.monthlyRevenue * 0.024))}k`,
-    status: 'Pending' as const,
-  }));
-
-  const trendingItems = [...apps]
-    .sort((a, b) => b.growth - a.growth)
-    .slice(0, 4)
-    .map((app) => ({
-      id: app.id,
-      name: app.name,
-      change: app.growth,
-    }));
-
-  const itemsToShow = marketplaceItems.length > 0 ? marketplaceItems : fallbackMarketplace;
+const MarketRail: React.FC<MarketRailProps> = ({ apps, onViewAllMarketplace, onSelectApp }) => {
+  const featuredMarketplaceApps = apps.filter((app) => app.isForSale).slice(0, 3);
+  const fallbackMarketplaceApps = apps.slice(0, 3);
+  const itemsToShow = featuredMarketplaceApps.length > 0 ? featuredMarketplaceApps : fallbackMarketplaceApps;
+  const trendingItems = [...apps].sort((a, b) => b.growth - a.growth).slice(0, 4);
 
   return (
     <aside className="flex flex-col gap-8 py-4 min-w-0">
@@ -54,28 +32,34 @@ const MarketRail: React.FC<MarketRailProps> = ({ apps, onViewAllMarketplace }) =
         </div>
         
         <div className="flex flex-col gap-3">
-          {itemsToShow.map(item => (
-            <div 
-              key={item.id}
-              className={`p-4 rounded-xl border transition-colors group cursor-pointer
-                ${item.status === 'Pending' 
-                  ? 'bg-zinc-900/40 border-zinc-800' 
-                  : 'bg-yellow-900/10 border-yellow-500/20 hover:border-yellow-500/40'}`}
-            >
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-white font-bold text-sm tracking-tight">{item.name}</span>
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${item.status === 'Pending' ? 'bg-zinc-800 text-zinc-500' : 'bg-yellow-500/20 text-yellow-500'}`}>
-                  {item.status.toUpperCase()}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="font-mono-data text-white text-base">{item.askingPrice}</span>
-                <span className="text-[10px] text-zinc-400 font-semibold group-hover:text-white transition-colors flex items-center gap-1">
-                  Contact <ExternalLink className="w-2.5 h-2.5" />
-                </span>
-              </div>
-            </div>
-          ))}
+          {itemsToShow.map((app) => {
+            const askingPrice = app.askingPrice ?? `$${Math.max(50, Math.round(app.monthlyRevenue * 0.024))}k`;
+            const isForSale = Boolean(app.isForSale);
+            return (
+              <button
+                type="button"
+                key={app.id}
+                onClick={() => onSelectApp?.(app)}
+                className={`p-4 rounded-xl border transition-colors group cursor-pointer
+                  ${isForSale
+                    ? 'bg-yellow-900/10 border-yellow-500/20 hover:border-yellow-500/40'
+                    : 'bg-zinc-900/40 border-zinc-800'}`}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-white font-bold text-sm tracking-tight">{app.name}</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isForSale ? 'bg-yellow-500/20 text-yellow-500' : 'bg-zinc-800 text-zinc-500'}`}>
+                    {(isForSale ? 'FOR SALE' : 'PENDING').toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="font-mono-data text-white text-base">{askingPrice}</span>
+                  <span className="text-[10px] text-zinc-400 font-semibold group-hover:text-white transition-colors flex items-center gap-1">
+                    Contact <ExternalLink className="w-2.5 h-2.5" />
+                  </span>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -88,10 +72,15 @@ const MarketRail: React.FC<MarketRailProps> = ({ apps, onViewAllMarketplace }) =
         </div>
         
         <div className="bg-[#050505] rounded-xl border border-white/5 divide-y divide-white/5 overflow-hidden">
-          {trendingItems.map(item => (
-            <div key={item.id} className="p-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors cursor-pointer group">
+          {trendingItems.map((app) => (
+            <button
+              type="button"
+              key={app.id}
+              onClick={() => onSelectApp?.(app)}
+              className="w-full text-left p-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors cursor-pointer group"
+            >
               <div className="flex flex-col">
-                <span className="text-zinc-200 text-sm font-semibold group-hover:text-white">{item.name}</span>
+                <span className="text-zinc-200 text-sm font-semibold group-hover:text-white">{app.name}</span>
                 <span className="text-[10px] text-zinc-500 font-medium">VELOCITY SCORE</span>
               </div>
               <div className="flex items-center gap-3">
@@ -105,11 +94,11 @@ const MarketRail: React.FC<MarketRailProps> = ({ apps, onViewAllMarketplace }) =
                      />
                    ))}
                 </div>
-                <span className={`font-mono-data text-xs ${item.change > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {item.change > 0 ? '+' : ''}{item.change}%
+                <span className={`font-mono-data text-xs ${app.growth > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {app.growth > 0 ? '+' : ''}{app.growth}%
                 </span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </div>

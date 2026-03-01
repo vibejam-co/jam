@@ -2,7 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, PencilLine, ShieldCheck } from 'lucide-react';
 import { MarketplaceVisibility } from '../types';
-import { deleteMarketplaceAsset, fetchMarketplaceAssetDetail, updateMarketplaceAsset } from '../lib/api';
+import {
+  deleteMarketplaceAsset,
+  fetchMarketplaceAssetFinancials,
+  fetchMarketplaceAssetTraffic,
+  fetchMarketplaceAssetDetail,
+  updateMarketplaceAsset,
+  updateMarketplaceAssetFinancials,
+  updateMarketplaceAssetTraffic,
+} from '../lib/api';
+import AssetFinancialsForm, { AssetFinancialsDraft } from './AssetFinancialsForm';
+import AssetTrafficForm, { AssetTrafficDraft } from './AssetTrafficForm';
 
 export interface ListingEditSeed {
   id: string;
@@ -16,7 +26,11 @@ export interface ListingEditSeed {
   founderEmail?: string;
   logoUrl?: string;
   askingPriceCents: number;
-  profitMarginPercent?: number | null;
+  mrrCents: number;
+  operatingExpensesCents?: number;
+  expenseBreakdown?: string;
+  monthlyUniqueVisitors?: number;
+  analyticsProofUrl?: string;
   isAnonymous: boolean;
   visibility: MarketplaceVisibility;
 }
@@ -47,9 +61,17 @@ const ListingEditModal: React.FC<ListingEditModalProps> = ({ seed, onClose, onSa
   const [founderEmail, setFounderEmail] = useState(seed.founderEmail ?? '');
   const [logoUrl, setLogoUrl] = useState(seed.logoUrl ?? '');
   const [askingPrice, setAskingPrice] = useState(fromCentsToUsdInput(seed.askingPriceCents));
-  const [profitMargin, setProfitMargin] = useState(
-    typeof seed.profitMarginPercent === 'number' ? String(seed.profitMarginPercent) : '',
+  const [mrrCents, setMrrCents] = useState(Math.max(0, Number(seed.mrrCents ?? 0)));
+  const [operatingExpensesCents, setOperatingExpensesCents] = useState(
+    Math.max(0, Number(seed.operatingExpensesCents ?? 0)),
   );
+  const [expenseBreakdown, setExpenseBreakdown] = useState(seed.expenseBreakdown ?? '');
+  const [financialDraft, setFinancialDraft] = useState<AssetFinancialsDraft | null>(null);
+  const [monthlyUniqueVisitors, setMonthlyUniqueVisitors] = useState(
+    Math.max(0, Number(seed.monthlyUniqueVisitors ?? 0)),
+  );
+  const [analyticsProofUrl, setAnalyticsProofUrl] = useState(seed.analyticsProofUrl ?? '');
+  const [trafficDraft, setTrafficDraft] = useState<AssetTrafficDraft | null>(null);
   const [isAnonymous, setIsAnonymous] = useState(Boolean(seed.isAnonymous));
   const [visibility, setVisibility] = useState<MarketplaceVisibility>(seed.visibility);
 
@@ -59,7 +81,6 @@ const ListingEditModal: React.FC<ListingEditModalProps> = ({ seed, onClose, onSa
   const [error, setError] = useState<string | null>(null);
 
   const normalizedPrice = useMemo(() => askingPrice.replace(/[^0-9.]/g, ''), [askingPrice]);
-  const normalizedProfitMargin = useMemo(() => profitMargin.replace(/[^0-9.]/g, ''), [profitMargin]);
   const parsedTechStack = useMemo(
     () =>
       techStackInput
@@ -75,7 +96,11 @@ const ListingEditModal: React.FC<ListingEditModalProps> = ({ seed, onClose, onSa
     const hydrate = async () => {
       setIsHydrating(true);
       try {
-        const response = await fetchMarketplaceAssetDetail(seed.id);
+        const [response, financials, traffic] = await Promise.all([
+          fetchMarketplaceAssetDetail(seed.id),
+          fetchMarketplaceAssetFinancials(seed.id).catch(() => null),
+          fetchMarketplaceAssetTraffic(seed.id).catch(() => null),
+        ]);
         if (cancelled || response.locked) {
           return;
         }
@@ -89,14 +114,45 @@ const ListingEditModal: React.FC<ListingEditModalProps> = ({ seed, onClose, onSa
         setFounderName(asset?.founder?.name ?? seed.founderName ?? '');
         setFounderEmail(asset?.founder?.email ?? seed.founderEmail ?? '');
         setLogoUrl(asset?.logoUrl ?? seed.logoUrl ?? '');
-        setAskingPrice(fromCentsToUsdInput(Number(asset.askingPriceCents ?? seed.askingPriceCents)));
-        setProfitMargin(
-          typeof asset.profitMarginPercent === 'number'
-            ? String(asset.profitMarginPercent)
-            : typeof seed.profitMarginPercent === 'number'
-              ? String(seed.profitMarginPercent)
-              : '',
+        const resolvedMrr = Math.max(
+          0,
+          Number(financials?.mrrCents ?? asset?.mrrCents ?? seed.mrrCents ?? 0),
         );
+        setMrrCents(resolvedMrr);
+        setOperatingExpensesCents(
+          Math.max(
+            0,
+            Number(financials?.operatingExpensesCents ?? asset?.operatingExpensesCents ?? seed.operatingExpensesCents ?? 0),
+          ),
+        );
+        setExpenseBreakdown(
+          typeof financials?.expenseBreakdown === 'string'
+            ? financials.expenseBreakdown
+            : typeof asset?.expenseBreakdown === 'string'
+              ? asset.expenseBreakdown
+              : (seed.expenseBreakdown ?? ''),
+        );
+        setMonthlyUniqueVisitors(
+          Math.max(
+            0,
+            Number(
+              (traffic as any)?.monthlyUniqueVisitors
+              ?? (response as any)?.asset?.monthlyUniqueVisitors
+              ?? (response as any)?.asset?.monthly_unique_visitors
+              ?? (seed.monthlyUniqueVisitors ?? 0),
+            ),
+          ),
+        );
+        setAnalyticsProofUrl(
+          typeof (traffic as any)?.analyticsProofUrl === 'string'
+            ? (traffic as any).analyticsProofUrl
+            : typeof (response as any)?.asset?.analyticsProofUrl === 'string'
+              ? (response as any).asset.analyticsProofUrl
+              : typeof (response as any)?.asset?.analytics_proof_url === 'string'
+                ? (response as any).asset.analytics_proof_url
+                : (seed.analyticsProofUrl ?? ''),
+        );
+        setAskingPrice(fromCentsToUsdInput(Number(asset.askingPriceCents ?? seed.askingPriceCents)));
         setIsAnonymous(Boolean(asset.isAnonymous ?? seed.isAnonymous));
         setVisibility((asset.visibility as MarketplaceVisibility) ?? seed.visibility);
       } catch {
@@ -146,10 +202,30 @@ const ListingEditModal: React.FC<ListingEditModalProps> = ({ seed, onClose, onSa
         founderName: founderName.trim() || undefined,
         founderEmail: founderEmail.trim() || undefined,
         askingPriceUsd: normalizedPrice,
-        profitMarginPercent: normalizedProfitMargin ? Number(normalizedProfitMargin) : null,
         isAnonymous,
         visibility,
       });
+
+      const sideEffects: Array<Promise<any>> = [];
+      if (financialDraft?.hasChanges) {
+        sideEffects.push(
+          updateMarketplaceAssetFinancials(seed.id, {
+            operatingExpenses: financialDraft.operatingExpenses,
+            expenseBreakdown: financialDraft.expenseBreakdown,
+          }),
+        );
+      }
+      if (trafficDraft?.hasChanges) {
+        sideEffects.push(
+          updateMarketplaceAssetTraffic(seed.id, {
+            monthlyUniqueVisitors: trafficDraft.monthlyUniqueVisitorsCount,
+            analyticsProofUrl: trafficDraft.analyticsProofUrl,
+          }),
+        );
+      }
+      if (sideEffects.length > 0) {
+        await Promise.all(sideEffects);
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('marketplace:refresh'));
@@ -323,7 +399,7 @@ const ListingEditModal: React.FC<ListingEditModalProps> = ({ seed, onClose, onSa
             </label>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 gap-5">
             <label className="space-y-2">
               <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Logo URL</span>
               <input
@@ -333,16 +409,22 @@ const ListingEditModal: React.FC<ListingEditModalProps> = ({ seed, onClose, onSa
                 placeholder="https://..."
               />
             </label>
-            <label className="space-y-2">
-              <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Profit Margin (%)</span>
-              <input
-                value={profitMargin}
-                onChange={(event) => setProfitMargin(event.target.value)}
-                className="w-full h-12 rounded-2xl border border-white/10 bg-white/5 px-4 text-white font-mono-data focus:outline-none focus:border-white/30"
-                placeholder="Optional"
-              />
-            </label>
           </div>
+
+          <AssetFinancialsForm
+            mrrCents={mrrCents}
+            initialOperatingExpensesCents={operatingExpensesCents}
+            initialExpenseBreakdown={expenseBreakdown}
+            disabled={isSaving || isDeleting || isHydrating}
+            onDraftChange={setFinancialDraft}
+          />
+
+          <AssetTrafficForm
+            initialMonthlyUniqueVisitors={monthlyUniqueVisitors}
+            initialAnalyticsProofUrl={analyticsProofUrl}
+            disabled={isSaving || isDeleting || isHydrating}
+            onDraftChange={setTrafficDraft}
+          />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="space-y-2">

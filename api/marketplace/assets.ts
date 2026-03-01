@@ -6,6 +6,7 @@ import {
   computeValuationMultipleX100,
   getQueryValue,
   isRecoverableSchemaError,
+  normalizeWebsiteUrl,
   parseBooleanQuery,
   parseUsdToCents,
   slugify,
@@ -13,6 +14,7 @@ import {
   toPercentBps,
 } from '../../lib/server/marketplace-utils.js';
 import {
+  CreateBuyerAlertSchema,
   CreateMarketplaceAssetDraftSchema,
   MarketplaceAssetsQuerySchema,
   UpdateMarketplaceAssetSchema,
@@ -28,6 +30,7 @@ const ASSET_SELECT = [
   'tagline',
   'description',
   'logo_url',
+  'website_url',
   'category',
   'subcategory',
   'tech_stack',
@@ -45,6 +48,8 @@ const ASSET_SELECT = [
   'last30d_revenue_cents',
   'last30d_growth_bps',
   'mrr_cents',
+  'monthly_unique_visitors',
+  'analytics_proof_url',
   'profit_margin_bps',
   'trailing_30d_revenue_cents',
   'trailing_30d_profit_cents',
@@ -203,6 +208,8 @@ const applyAssetFilters = (
   canViewMembers: boolean,
   options?: {
     includeListedStatusFallback?: boolean;
+    allowChurnFilter?: boolean;
+    allowTrafficFilter?: boolean;
   },
 ) => {
   let next = query;
@@ -239,6 +246,15 @@ const applyAssetFilters = (
   if (typeof params.max_multiple === 'number') {
     next = next.lte('valuation_multiple_x100', params.max_multiple * 100);
   }
+  if (typeof params.minProfitMarginBps === 'number') {
+    next = next.gte('profit_margin_bps', params.minProfitMarginBps);
+  }
+  if (typeof params.minTraffic === 'number' && options?.allowTrafficFilter !== false) {
+    next = next.gte('monthly_unique_visitors', params.minTraffic);
+  }
+  if (typeof params.maxChurnBps === 'number' && options?.allowChurnFilter !== false) {
+    next = next.lte('churn_bps', params.maxChurnBps);
+  }
   if (params.verified_only) {
     next = next.eq('verified_status', 'verified');
   }
@@ -255,6 +271,18 @@ const applyAssetFilters = (
 
   return next;
 };
+
+const mapBuyerAlertResponse = (row: any) => ({
+  id: String(row.id),
+  email: String(row.email ?? ''),
+  minMrrCents: Math.max(0, Number(row.min_mrr_cents ?? 0)),
+  maxPriceCents:
+    typeof row.max_price_cents === 'number' && Number.isFinite(row.max_price_cents)
+      ? Math.max(0, Math.round(row.max_price_cents))
+      : null,
+  minProfitMarginBps: Math.max(0, Number(row.min_profit_margin_bps ?? 0)),
+  createdAt: String(row.created_at ?? new Date().toISOString()),
+});
 
 const reserveUniqueSlug = async (supabase: any, desiredName: string): Promise<string> => {
   const base = slugify(desiredName) || 'asset';
@@ -279,10 +307,145 @@ const reserveUniqueSlug = async (supabase: any, desiredName: string): Promise<st
   throw new Error('Could not generate unique slug for asset.');
 };
 
+const normalizeAssetName = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
+const isUniqueViolation = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const code = 'code' in error ? String((error as { code?: unknown }).code ?? '') : '';
+  return code === '23505';
+};
+
 export default async function handler(req: any, res: any) {
   try {
     const method = getMethod(req);
     const idOrSlug = getQueryValue(req, 'assetId') ?? undefined;
+    const scope = getQueryValue(req, 'scope') ?? undefined;
+
+    if (scope === 'alerts') {
+      if (method !== 'GET' && method !== 'POST') {
+        return methodNotAllowed(res, ['GET', 'POST']);
+      }
+
+      const user = await getAuthenticatedUser(req);
+      if (!user?.id) {
+        return sendJson(res, 401, { error: 'Authentication required.' });
+      }
+
+      const userEmail = String(user.email ?? '').trim();
+      if (!userEmail) {
+        return sendJson(res, 400, { error: 'Authenticated user does not have an email address.' });
+      }
+
+      const supabase = await getSupabaseAdmin();
+
+      if (method === 'GET') {
+        const { data, error } = await supabase
+          .from('buyer_alerts')
+          .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          if (isRecoverableSchemaError(error)) {
+            return sendJson(res, 503, {
+              error: 'Buyer alerts are not ready yet.',
+              details: 'Run the latest Supabase migration to enable buyer alerts.',
+            });
+          }
+          throw error;
+        }
+
+        return sendJson(res, 200, {
+          data: {
+            items: Array.isArray(data) ? data.map(mapBuyerAlertResponse) : [],
+          },
+        });
+      }
+
+      const payloadRaw = await parseJsonBody(req);
+      const parsed = CreateBuyerAlertSchema.safeParse(payloadRaw);
+      if (!parsed.success) {
+        return sendJson(res, 400, {
+          error: 'Invalid buyer alert payload.',
+          details: parsed.error.issues[0]?.message,
+        });
+      }
+
+      const payload = parsed.data;
+      const minMrrCents = Math.max(0, Math.round(Number(payload.minMrrCents ?? 0)));
+      const maxPriceCents = payload.maxPriceCents === null || payload.maxPriceCents === undefined
+        ? null
+        : Math.max(0, Math.round(Number(payload.maxPriceCents)));
+      const minProfitMarginBps = Math.max(0, Math.round(Number(payload.minProfitMarginBps ?? 0)));
+
+      let existingQuery = supabase
+        .from('buyer_alerts')
+        .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,created_at')
+        .eq('user_id', user.id)
+        .eq('email', userEmail)
+        .eq('min_mrr_cents', minMrrCents)
+        .eq('min_profit_margin_bps', minProfitMarginBps)
+        .limit(1);
+
+      existingQuery = maxPriceCents === null
+        ? existingQuery.is('max_price_cents', null)
+        : existingQuery.eq('max_price_cents', maxPriceCents);
+
+      const { data: existingAlert, error: existingError } = await existingQuery.maybeSingle();
+      if (existingError) {
+        if (isRecoverableSchemaError(existingError)) {
+          return sendJson(res, 503, {
+            error: 'Buyer alerts are not ready yet.',
+            details: 'Run the latest Supabase migration to enable buyer alerts.',
+          });
+        }
+        throw existingError;
+      }
+
+      if (existingAlert) {
+        return sendJson(res, 200, {
+          data: {
+            alert: mapBuyerAlertResponse(existingAlert),
+            alreadyExisted: true,
+          },
+        });
+      }
+
+      const { data: inserted, error: insertError } = await supabase
+        .from('buyer_alerts')
+        .insert({
+          user_id: user.id,
+          email: userEmail,
+          min_mrr_cents: minMrrCents,
+          max_price_cents: maxPriceCents,
+          min_profit_margin_bps: minProfitMarginBps,
+        })
+        .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,created_at')
+        .single();
+
+      if (insertError) {
+        if (isRecoverableSchemaError(insertError)) {
+          return sendJson(res, 503, {
+            error: 'Buyer alerts are not ready yet.',
+            details: 'Run the latest Supabase migration to enable buyer alerts.',
+          });
+        }
+        throw insertError;
+      }
+
+      return sendJson(res, 200, {
+        data: {
+          alert: mapBuyerAlertResponse(inserted),
+          alreadyExisted: false,
+        },
+      });
+    }
 
     if (method === 'GET' && idOrSlug) {
       const supabase = await getSupabaseAdmin();
@@ -389,6 +552,15 @@ export default async function handler(req: any, res: any) {
       if (payload.tagline !== undefined) updatePayload.tagline = payload.tagline;
       if (payload.description !== undefined) updatePayload.description = payload.description;
       if (payload.logoUrl !== undefined) updatePayload.logo_url = payload.logoUrl || null;
+      if (payload.websiteUrl !== undefined) {
+        const normalizedWebsiteUrl = normalizeWebsiteUrl(payload.websiteUrl);
+        if (payload.websiteUrl.trim().length > 0 && !normalizedWebsiteUrl) {
+          return sendJson(res, 400, {
+            error: 'Website URL must be a valid http(s) URL.',
+          });
+        }
+        updatePayload.website_url = normalizedWebsiteUrl;
+      }
       if (payload.category !== undefined) updatePayload.category = payload.category;
       if (payload.subcategory !== undefined) updatePayload.subcategory = payload.subcategory || null;
       if (payload.techStack !== undefined) updatePayload.tech_stack = payload.techStack;
@@ -429,6 +601,7 @@ export default async function handler(req: any, res: any) {
       delete (fallbackUpdatePayload as any).title;
       delete (fallbackUpdatePayload as any).domain_visibility;
       delete (fallbackUpdatePayload as any).profit_margin_pct;
+      delete (fallbackUpdatePayload as any).website_url;
 
       let updateResult = await supabase
         .from('marketplace_assets')
@@ -449,6 +622,12 @@ export default async function handler(req: any, res: any) {
       const { data: updatedRow, error: updateError } = updateResult;
 
       if (updateError) {
+        if (isUniqueViolation(updateError)) {
+          return sendJson(res, 409, {
+            error: 'This website is already linked to another listing.',
+            code: 'WEBSITE_ALREADY_CLAIMED',
+          });
+        }
         throw updateError;
       }
 
@@ -562,6 +741,18 @@ export default async function handler(req: any, res: any) {
         max_price: getQueryValue(req, 'max_price') ?? undefined,
         min_rev30: getQueryValue(req, 'min_rev30') ?? undefined,
         max_multiple: getQueryValue(req, 'max_multiple') ?? undefined,
+        minProfitMarginBps:
+          getQueryValue(req, 'minProfitMarginBps')
+          ?? getQueryValue(req, 'min_profit_margin_bps')
+          ?? undefined,
+        maxChurnBps:
+          getQueryValue(req, 'maxChurnBps')
+          ?? getQueryValue(req, 'max_churn_bps')
+          ?? undefined,
+        minTraffic:
+          getQueryValue(req, 'minTraffic')
+          ?? getQueryValue(req, 'min_traffic')
+          ?? undefined,
         verified_only: parseBooleanQuery(getQueryValue(req, 'verified_only')),
         sort: getQueryValue(req, 'sort') ?? undefined,
         page: getQueryValue(req, 'page') ?? undefined,
@@ -586,6 +777,8 @@ export default async function handler(req: any, res: any) {
 
       dataQuery = applyAssetFilters(dataQuery, params, canViewMembers, {
         includeListedStatusFallback: true,
+        allowChurnFilter: true,
+        allowTrafficFilter: true,
       }).range(from, to);
 
       let queryResult = await dataQuery;
@@ -596,6 +789,8 @@ export default async function handler(req: any, res: any) {
           .select(LEGACY_ASSET_SELECT, { count: 'exact' });
         fallbackQuery = applyAssetFilters(fallbackQuery, params, canViewMembers, {
           includeListedStatusFallback: false,
+          allowChurnFilter: false,
+          allowTrafficFilter: false,
         }).range(from, to);
         queryResult = await fallbackQuery;
       }
@@ -659,12 +854,25 @@ export default async function handler(req: any, res: any) {
         };
       });
 
+      const filteredRows = hydratedRows.filter((row: any) => {
+        if (typeof params.maxChurnBps === 'number') {
+          const churnBps =
+            typeof row?.churn_bps === 'number' && Number.isFinite(row.churn_bps)
+              ? Math.round(row.churn_bps)
+              : null;
+          if (churnBps === null || churnBps > params.maxChurnBps) {
+            return false;
+          }
+        }
+        return true;
+      });
+
       return sendJson(res, 200, {
         data: {
-          items: hydratedRows.map((row: any) => toMarketplaceCard(row, { viewerUserId: user?.id ?? null })),
+          items: filteredRows.map((row: any) => toMarketplaceCard(row, { viewerUserId: user?.id ?? null })),
           page: params.page,
           pageSize: params.pageSize,
-          total: count ?? 0,
+          total: count ?? filteredRows.length,
           hasMore: (count ?? 0) > to + 1,
           meta: {
             requiresMembership: !canViewMembers,
@@ -690,7 +898,63 @@ export default async function handler(req: any, res: any) {
       }
 
       const payload = parsed.data;
+      const normalizedWebsiteUrl = normalizeWebsiteUrl(payload.websiteUrl);
       const supabase = await getSupabaseAdmin();
+
+      const siblingSelectPrimary = 'id,slug,name,jam_id,is_listed,listing_status';
+      const siblingSelectFallback = 'id,slug,name,jam_id,is_listed';
+      let siblingRowsResult = await supabase
+        .from('marketplace_assets')
+        .select(siblingSelectPrimary)
+        .eq('owner_user_id', user.id);
+
+      if (siblingRowsResult.error && isRecoverableSchemaError(siblingRowsResult.error)) {
+        siblingRowsResult = await supabase
+          .from('marketplace_assets')
+          .select(siblingSelectFallback)
+          .eq('owner_user_id', user.id);
+      }
+
+      if (siblingRowsResult.error) {
+        throw siblingRowsResult.error;
+      }
+
+      const payloadNameNormalized = normalizeAssetName(payload.name);
+      const duplicateListedRow = (Array.isArray(siblingRowsResult.data) ? siblingRowsResult.data : []).find((row: any) => {
+        const listingStatus = String(row.listing_status ?? '').toUpperCase();
+        const isActive = row.is_listed === true || listingStatus === 'LISTED' || listingStatus === 'LIVE';
+        if (!isActive) {
+          return false;
+        }
+        if (payload.jamId && row.jam_id && String(payload.jamId) === String(row.jam_id)) {
+          return true;
+        }
+        return normalizeAssetName(row.name) === payloadNameNormalized;
+      });
+
+      if (duplicateListedRow) {
+        await writeMarketplaceAuditLog({
+          actorUserId: user.id,
+          assetId: duplicateListedRow.id,
+          action: 'draft_blocked_duplicate_listing',
+          severity: 'WARN',
+          reason: 'DUPLICATE_ACTIVE_LISTING',
+          metadata: {
+            duplicate_asset_id: duplicateListedRow.id,
+            duplicate_slug: duplicateListedRow.slug ?? null,
+            owner_user_id: user.id,
+            attempted_name: payload.name,
+            attempted_jam_id: payload.jamId ?? null,
+          },
+        });
+
+        return sendJson(res, 409, {
+          error: 'This app is already listed in Marketplace. Edit the existing listing instead of creating a duplicate.',
+          code: 'DUPLICATE_ASSET_LISTING',
+          existingAssetId: duplicateListedRow.id,
+          existingSlug: duplicateListedRow.slug ?? null,
+        });
+      }
 
       const { data: existingDraft, error: existingDraftError } = await supabase
         .from('marketplace_assets')
@@ -713,6 +977,7 @@ export default async function handler(req: any, res: any) {
           tagline: payload.tagline,
           description: payload.description,
           logo_url: payload.logoUrl || null,
+          website_url: normalizedWebsiteUrl,
           category: payload.category,
           subcategory: payload.subcategory || null,
           tech_stack: payload.techStack,
@@ -756,6 +1021,12 @@ export default async function handler(req: any, res: any) {
         const { data: updatedDraft, error: updateError } = draftUpdateResult;
 
         if (updateError) {
+          if (isUniqueViolation(updateError)) {
+            return sendJson(res, 409, {
+              error: 'This website is already linked to another listing.',
+              code: 'WEBSITE_ALREADY_CLAIMED',
+            });
+          }
           throw updateError;
         }
 
@@ -789,6 +1060,7 @@ export default async function handler(req: any, res: any) {
         tagline: payload.tagline,
         description: payload.description,
         logo_url: payload.logoUrl || null,
+        website_url: normalizedWebsiteUrl,
         category: payload.category,
         subcategory: payload.subcategory || null,
         tech_stack: payload.techStack,
@@ -838,6 +1110,12 @@ export default async function handler(req: any, res: any) {
       const { data, error } = insertResult;
 
       if (error) {
+        if (isUniqueViolation(error)) {
+          return sendJson(res, 409, {
+            error: 'This website is already linked to another listing.',
+            code: 'WEBSITE_ALREADY_CLAIMED',
+          });
+        }
         throw error;
       }
 

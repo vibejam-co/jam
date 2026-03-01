@@ -1,6 +1,9 @@
 import { listDodoPayments } from '../dodo-payments.js';
 import type { NormalizedTransaction, ProviderAdapter, ProviderMetrics } from './types.js';
 
+const DODO_API_BASE = (process.env.DODO_API_BASE_URL?.trim() || 'https://api.dodopayments.com')
+  .replace(/\/+$/, '');
+
 const toCents = (value: unknown): number => {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return Math.round(value);
@@ -188,6 +191,143 @@ const isTransientError = (error: unknown): boolean => {
   );
 };
 
+const dodoRequest = async (key: string, path: string): Promise<any> => {
+  const url = new URL(`${DODO_API_BASE}${path}`);
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      Accept: 'application/json',
+    },
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const errorMessage =
+      (typeof payload?.message === 'string' && payload.message.trim()) ||
+      (typeof payload?.error === 'string' && payload.error.trim()) ||
+      `Dodo request failed (${response.status}).`;
+    throw new Error(errorMessage);
+  }
+  return payload;
+};
+
+const pickProviderAccountId = (row: Record<string, unknown> | null | undefined): string | null => {
+  if (!row) {
+    return null;
+  }
+
+  const directKeys = ['store_id', 'merchant_id', 'business_id', 'account_id', 'organization_id', 'id'];
+  for (const key of directKeys) {
+    const value = row[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  const nestedKeys = ['store', 'merchant', 'business', 'account', 'organization', 'seller'];
+  for (const key of nestedKeys) {
+    const nested = row[key];
+    if (!nested || typeof nested !== 'object') {
+      continue;
+    }
+    const nestedId = pickProviderAccountId(nested as Record<string, unknown>);
+    if (nestedId) {
+      return nestedId;
+    }
+  }
+
+  return null;
+};
+
+const resolveProviderAccountIdFromPayload = (payload: any): string | null => {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const candidate = pickProviderAccountId(item as Record<string, unknown>);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  const direct = pickProviderAccountId(payload as Record<string, unknown>);
+  if (direct) {
+    return direct;
+  }
+
+  const collections = ['items', 'data', 'results', 'stores', 'merchants', 'accounts'];
+  for (const key of collections) {
+    const maybeArray = payload[key];
+    if (!Array.isArray(maybeArray)) {
+      continue;
+    }
+    for (const item of maybeArray) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const candidate = pickProviderAccountId(item as Record<string, unknown>);
+      if (candidate) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+};
+
+const resolveDodoProviderAccountId = async (key: string): Promise<string | null> => {
+  try {
+    const { items } = await listDodoPayments(key, { limit: 1 });
+    if (items.length > 0) {
+      const fromPayments = resolveProviderAccountIdFromPayload(items[0]);
+      if (fromPayments) {
+        return fromPayments;
+      }
+    }
+  } catch (error) {
+    if (isAuthError(error)) {
+      throw error;
+    }
+  }
+
+  const accountPaths = [
+    '/stores/me',
+    '/merchants/me',
+    '/account',
+    '/accounts/me',
+    '/stores?limit=1',
+    '/merchants?limit=1',
+  ];
+
+  for (const path of accountPaths) {
+    try {
+      const payload = await dodoRequest(key, path);
+      const candidate = resolveProviderAccountIdFromPayload(payload);
+      if (candidate) {
+        return candidate;
+      }
+    } catch (error) {
+      if (isAuthError(error)) {
+        throw error;
+      }
+      if (isTransientError(error)) {
+        continue;
+      }
+      continue;
+    }
+  }
+
+  return null;
+};
+
 export const dodoAdapter: ProviderAdapter = {
   provider: 'dodo',
 
@@ -196,8 +336,10 @@ export const dodoAdapter: ProviderAdapter = {
       throw new Error('Dodo key format is invalid.');
     }
 
+    let providerAccountId: string | null = null;
+
     try {
-      await listDodoPayments(key, { limit: 1 });
+      providerAccountId = await resolveDodoProviderAccountId(key);
     } catch (error) {
       if (isAuthError(error)) {
         throw new Error('Dodo key was rejected. Please verify the key and permissions.');
@@ -218,10 +360,15 @@ export const dodoAdapter: ProviderAdapter = {
       };
     }
 
+    if (!providerAccountId) {
+      throw new Error('Unable to resolve Dodo merchant/store id from this key. Confirm key permissions and try again.');
+    }
+
     return {
       readOnlyLikely: false,
       warning:
         'Dodo scope introspection is limited. Use the least-privilege key possible (read-only when available).',
+      providerAccountId,
     };
   },
 

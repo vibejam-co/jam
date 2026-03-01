@@ -9,6 +9,17 @@ interface GemstoneIconProps {
   size?: 'sm' | 'md' | 'lg';
 }
 
+const isImageIconSource = (icon: string): boolean => {
+  const value = String(icon ?? '').trim().toLowerCase();
+  return (
+    value.startsWith('data:image/')
+    || value.startsWith('https://')
+    || value.startsWith('http://')
+    || value.startsWith('blob:')
+    || value.startsWith('/')
+  );
+};
+
 const GemstoneIcon: React.FC<GemstoneIconProps> = ({ icon, accentColor, isHovered, size = 'md' }) => {
   const containerClasses = {
     sm: 'w-10 h-10 rounded-[14px]',
@@ -21,6 +32,10 @@ const GemstoneIcon: React.FC<GemstoneIconProps> = ({ icon, accentColor, isHovere
     md: 'text-xl sm:text-2xl',
     lg: 'text-3xl sm:text-4xl'
   };
+  const shouldRenderImage = isImageIconSource(icon);
+  const coreContainerClassName = shouldRenderImage
+    ? 'relative flex items-center justify-center overflow-hidden transition-all duration-500'
+    : 'relative flex items-center justify-center ring-1 ring-white/10 bg-[#0a0a0a] overflow-hidden icon-inset-shadow transition-all duration-500';
 
   return (
     <div className="relative group shrink-0">
@@ -35,16 +50,27 @@ const GemstoneIcon: React.FC<GemstoneIconProps> = ({ icon, accentColor, isHovere
       
       {/* The Core Icon Container */}
       <div 
-        className={`relative flex items-center justify-center ring-1 ring-white/10 bg-[#0a0a0a] overflow-hidden icon-inset-shadow transition-all duration-500 ${containerClasses[size]}`}
+        className={`${coreContainerClassName} ${containerClasses[size]}`}
         style={{
           boxShadow: isHovered 
             ? `0 0 30px -5px rgba(${accentColor}, 0.4), inset 0 2px 4px 0 rgba(255, 255, 255, 0.15)` 
             : `0 0 10px -5px rgba(${accentColor}, 0.1), inset 0 1px 2px 0 rgba(255, 255, 255, 0.05)`
         }}
       >
-        <span className={`${textClasses[size]} z-10 transition-transform duration-500`} style={{ transform: isHovered ? 'scale(1.1)' : 'scale(1)' }}>
-          {icon}
-        </span>
+        {shouldRenderImage ? (
+          <img
+            src={icon}
+            alt="App icon"
+            className="absolute inset-0 h-full w-full object-cover object-center z-10 transition-transform duration-500"
+            style={{ transform: isHovered ? 'scale(1.04)' : 'scale(1.01)' }}
+            loading="lazy"
+            draggable={false}
+          />
+        ) : (
+          <span className={`${textClasses[size]} z-10 transition-transform duration-500`} style={{ transform: isHovered ? 'scale(1.1)' : 'scale(1)' }}>
+            {icon}
+          </span>
+        )}
 
         {/* Shine Animation Overlay */}
         <AnimatePresence>

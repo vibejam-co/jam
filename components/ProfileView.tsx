@@ -18,8 +18,14 @@ import {
   Send,
   ChevronLeft,
   PencilLine,
+  FileText,
+  Download,
+  Link2,
+  FolderOpen,
+  Lock,
+  Loader2,
 } from 'lucide-react';
-import { VibeApp, MarketplaceOwnerAsset, AcquireStage } from '../types';
+import { VibeApp, MarketplaceOwnerAsset, AcquireStage, DealRoomData, DealRoomStatus } from '../types';
 import GemstoneIcon from './GemstoneIcon';
 import ListingEditModal, { ListingEditSeed } from './ListingEditModal';
 import {
@@ -31,6 +37,8 @@ import {
   updateAcquireStage,
   startInboxConversation,
   fetchMyMarketplaceAssets,
+  fetchDealRoom,
+  initiateDealRoomEscrow,
 } from '../lib/api';
 
 interface ProfileViewProps {
@@ -154,6 +162,77 @@ const stageButtonLabel = (stage: AcquireStage): string => {
   }
 };
 
+const DEAL_DOC_LINKS = {
+  loi: '/templates/loi-template.pdf',
+  apa: '/templates/apa-template.pdf',
+};
+
+const DEAL_ROOM_FLOW: DealRoomStatus[] = [
+  'ACCEPTED',
+  'LOI_SIGNED',
+  'DUE_DILIGENCE',
+  'APA_SIGNED',
+  'ESCROW_FUNDED',
+  'ASSETS_TRANSFERRED',
+  'CLOSED',
+];
+
+const LOCKED_STEP_COPY = 'Locked (Requires previous step completion)';
+
+const toDealRoomStatusFromAcquireStage = (stage?: AcquireStage | null): DealRoomStatus => {
+  switch (stage) {
+    case 'LOI_SIGNED':
+      return 'LOI_SIGNED';
+    case 'DUE_DILIGENCE':
+      return 'DUE_DILIGENCE';
+    case 'APA_SIGNED':
+      return 'APA_SIGNED';
+    case 'ESCROW_FUNDED':
+      return 'ESCROW_FUNDED';
+    case 'CLOSED':
+      return 'CLOSED';
+    default:
+      return 'PENDING';
+  }
+};
+
+const isValidHttpsUrl = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+const linkifyMessageBody = (value: string): React.ReactNode[] => {
+  const lines = String(value ?? '').split('\n');
+  return lines.map((line, lineIndex) => {
+    const parts = line.split(/(https?:\/\/[^\s]+)/g).filter(Boolean);
+    return (
+      <React.Fragment key={`line-${lineIndex}`}>
+        {parts.map((part, index) => {
+          if (/^https?:\/\/[^\s]+$/i.test(part)) {
+            return (
+              <a
+                key={`part-${lineIndex}-${index}`}
+                href={part}
+                target="_blank"
+                rel="noreferrer"
+                className="text-cyan-300 underline underline-offset-2 break-all hover:text-cyan-200"
+              >
+                {part}
+              </a>
+            );
+          }
+          return <React.Fragment key={`part-${lineIndex}-${index}`}>{part}</React.Fragment>;
+        })}
+        {lineIndex < lines.length - 1 && <br />}
+      </React.Fragment>
+    );
+  });
+};
+
 const ProfileView: React.FC<ProfileViewProps> = ({
   onClose,
   wishlist,
@@ -178,10 +257,15 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   const [inboxThreads, setInboxThreads] = useState<any[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
+  const [selectedDealRoom, setSelectedDealRoom] = useState<DealRoomData | null>(null);
   const [conversationMessages, setConversationMessages] = useState<any[]>([]);
   const [messageDraft, setMessageDraft] = useState('');
+  const [signedDocUrl, setSignedDocUrl] = useState('');
+  const [signedDocType, setSignedDocType] = useState<'LOI' | 'APA' | 'DOC'>('LOI');
+  const [signedDocNote, setSignedDocNote] = useState('');
   const [inboxError, setInboxError] = useState<string | null>(null);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [isInitiatingEscrow, setIsInitiatingEscrow] = useState(false);
 
   const [pipeline, setPipeline] = useState<any>({ items: [], stages: [] });
   const [pipelineError, setPipelineError] = useState<string | null>(null);
@@ -305,7 +389,11 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   useEffect(() => {
     if (!selectedConversationId) {
       setSelectedConversation(null);
+      setSelectedDealRoom(null);
       setConversationMessages([]);
+      setSignedDocUrl('');
+      setSignedDocNote('');
+      setSignedDocType('LOI');
       return;
     }
 
@@ -413,9 +501,65 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     return grouped;
   }, [pipeline]);
 
-  const handleSendMessage = async () => {
-    if (!selectedConversationId || !messageDraft.trim() || isSendingMessage) {
+  const pipelineItemByListingId = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const item of Array.isArray(pipeline?.items) ? pipeline.items : []) {
+      if (item?.listingId) {
+        map.set(String(item.listingId), item);
+      }
+    }
+    return map;
+  }, [pipeline]);
+
+  const selectedPipelineItem = useMemo(() => {
+    const listingId = selectedConversation?.listingId ? String(selectedConversation.listingId) : '';
+    if (!listingId) {
+      return null;
+    }
+    return pipelineItemByListingId.get(listingId) ?? null;
+  }, [pipelineItemByListingId, selectedConversation?.listingId]);
+
+  useEffect(() => {
+    const offerId = String(selectedConversation?.dealOfferId ?? '').trim();
+    if (!offerId) {
+      setSelectedDealRoom(null);
       return;
+    }
+
+    let cancelled = false;
+    const loadDeal = async () => {
+      try {
+        const response = await fetchDealRoom(offerId);
+        if (!cancelled) {
+          setSelectedDealRoom(response.deal);
+        }
+      } catch {
+        if (!cancelled) {
+          setSelectedDealRoom(null);
+        }
+      }
+    };
+
+    void loadDeal();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedConversation?.dealOfferId]);
+
+  const progressiveDealStatus = useMemo<DealRoomStatus>(() => {
+    if (selectedDealRoom?.status) {
+      return selectedDealRoom.status;
+    }
+    return toDealRoomStatusFromAcquireStage(selectedPipelineItem?.stage as AcquireStage | undefined);
+  }, [selectedDealRoom?.status, selectedPipelineItem?.stage]);
+
+  const progressiveIndex = useMemo(() => {
+    return DEAL_ROOM_FLOW.findIndex((status) => status === progressiveDealStatus);
+  }, [progressiveDealStatus]);
+
+  const pushConversationMessage = async (body: string): Promise<boolean> => {
+    if (!selectedConversationId || !body.trim() || isSendingMessage) {
+      return false;
     }
 
     setIsSendingMessage(true);
@@ -424,19 +568,80 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     try {
       const response = await sendInboxMessage({
         conversationId: selectedConversationId,
-        body: messageDraft.trim(),
+        body: body.trim(),
       });
 
       setConversationMessages((prev) => [...prev, response.message]);
       if (response.conversationId && response.conversationId !== selectedConversationId) {
         setSelectedConversationId(response.conversationId);
       }
-      setMessageDraft('');
       await refreshConversations();
+      return true;
     } catch (error) {
       setInboxError(error instanceof Error ? error.message : 'Failed to send message.');
+      return false;
     } finally {
       setIsSendingMessage(false);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    const nextBody = messageDraft.trim();
+    if (!nextBody) {
+      return;
+    }
+    const sent = await pushConversationMessage(nextBody);
+    if (sent) {
+      setMessageDraft('');
+    }
+  };
+
+  const handleShareSignedDocument = async () => {
+    const normalizedUrl = signedDocUrl.trim();
+    if (!selectedConversationId || !normalizedUrl) {
+      return;
+    }
+    if (!isValidHttpsUrl(normalizedUrl)) {
+      setInboxError('Signed document link must be a valid https:// URL.');
+      return;
+    }
+
+    const note = signedDocNote.trim();
+    const body =
+      `Signed ${signedDocType} document ready for review:\n${normalizedUrl}`
+      + (note ? `\n\nNotes: ${note}` : '');
+
+    const sent = await pushConversationMessage(body);
+    if (sent) {
+      setSignedDocUrl('');
+      setSignedDocNote('');
+    }
+  };
+
+  const handleInitiateEscrowFromProfile = async () => {
+    const offerId = String(selectedConversation?.dealOfferId ?? '').trim();
+    if (!offerId || isInitiatingEscrow) {
+      return;
+    }
+
+    setIsInitiatingEscrow(true);
+    setInboxError(null);
+
+    try {
+      const response = await initiateDealRoomEscrow(offerId);
+      if (response.deal) {
+        setSelectedDealRoom(response.deal);
+      }
+      const landingPage = String(response.landingPage ?? '').trim();
+      if (landingPage) {
+        window.location.href = landingPage;
+        return;
+      }
+      setInboxError('Escrow vault was created, but no redirect link was returned yet.');
+    } catch (error) {
+      setInboxError(error instanceof Error ? error.message : 'Failed to initiate escrow.');
+    } finally {
+      setIsInitiatingEscrow(false);
     }
   };
 
@@ -480,7 +685,11 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     techStack: asset.techStack ?? [],
     logoUrl: asset.logoUrl ?? '',
     askingPriceCents: asset.askingPriceCents,
-    profitMarginPercent: asset.profitMarginPercent ?? null,
+    mrrCents: asset.mrrCents,
+    operatingExpensesCents: 0,
+    expenseBreakdown: '',
+    monthlyUniqueVisitors: Math.max(0, Number(asset.monthlyUniqueVisitors ?? 0)),
+    analyticsProofUrl: typeof asset.analyticsProofUrl === 'string' ? asset.analyticsProofUrl : '',
     isAnonymous: asset.isAnonymous,
     visibility: asset.visibility,
   });
@@ -716,7 +925,171 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                         <p className="text-[10px] text-cyan-300 font-black uppercase tracking-widest truncate">
                           {selectedConversation?.listingName ?? 'Listing'}
                         </p>
+                        {selectedPipelineItem?.stageLabel && (
+                          <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest truncate mt-1">
+                            Stage: {selectedPipelineItem.stageLabel}
+                          </p>
+                        )}
                       </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Deal Documents</p>
+                        {selectedConversation?.dealOfferId && (
+                          <a
+                            href={`/deal-room/${encodeURIComponent(String(selectedConversation.dealOfferId))}`}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-cyan-200 hover:border-cyan-400/45 transition-all"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5" />
+                            Open Deal Room
+                          </a>
+                        )}
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Current Deal Status</p>
+                        <p className="text-xs font-bold text-white mt-1">{progressiveDealStatus.replace(/_/g, ' ')}</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        {DEAL_ROOM_FLOW.slice(0, 5).map((status, index) => {
+                          const isCompleted = progressiveIndex >= index && progressiveIndex >= 0;
+                          const isCurrent = progressiveDealStatus === status;
+                          const isLocked = progressiveIndex === -1 ? true : index > progressiveIndex;
+                          return (
+                            <div
+                              key={status}
+                              className={`rounded-xl border px-3 py-2 ${isCompleted ? 'border-cyan-500/25 bg-cyan-500/5' : 'border-white/10 bg-black/30'}`}
+                            >
+                              <p className={`text-[10px] font-black uppercase tracking-widest ${isCompleted ? 'text-cyan-200' : 'text-zinc-400'}`}>
+                                {status.replace(/_/g, ' ')} {isCurrent ? '• Current' : ''}
+                              </p>
+                              {isLocked && !isCurrent && (
+                                <p className="text-[10px] text-zinc-500 mt-1">{LOCKED_STEP_COPY}</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {progressiveDealStatus === 'ACCEPTED' && (
+                        <>
+                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-3 space-y-1">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Buyer & Seller Emails</p>
+                            <p className="text-xs text-zinc-300 break-all">Buyer: {selectedDealRoom?.buyer.email ?? 'Not available yet'}</p>
+                            <p className="text-xs text-zinc-300 break-all">Seller: {selectedDealRoom?.seller.email ?? 'Not available yet'}</p>
+                          </div>
+                          <a
+                            href={DEAL_DOC_LINKS.loi}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center justify-center gap-2 h-10 rounded-xl border border-white/15 bg-black/40 text-[10px] font-black uppercase tracking-widest text-zinc-200 hover:border-white/30 transition-all px-3"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            Download LOI
+                          </a>
+                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[10px] text-zinc-500 inline-flex items-center gap-2">
+                            <Lock className="w-3.5 h-3.5" /> APA Locked (Requires previous step completion)
+                          </div>
+                          <div className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-[10px] text-zinc-500 inline-flex items-center gap-2">
+                            <Lock className="w-3.5 h-3.5" /> Escrow Locked (Requires previous step completion)
+                          </div>
+                        </>
+                      )}
+
+                      {progressiveDealStatus === 'LOI_SIGNED' && (
+                        <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-3 space-y-1">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300">Due Diligence Checklist</p>
+                          <p className="text-xs text-zinc-300">Seller must share read-only GitHub and analytics access before proceeding.</p>
+                          <p className="text-[10px] text-zinc-400">1. GitHub repository read-only access.</p>
+                          <p className="text-[10px] text-zinc-400">2. Google Analytics/Plausible read-only access.</p>
+                          <p className="text-[10px] text-zinc-400">3. Subscription/revenue dashboard read-only access.</p>
+                        </div>
+                      )}
+
+                      {progressiveDealStatus === 'DUE_DILIGENCE' && (
+                        <a
+                          href={DEAL_DOC_LINKS.apa}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center justify-center gap-2 h-10 rounded-xl border border-white/15 bg-black/40 text-[10px] font-black uppercase tracking-widest text-zinc-200 hover:border-white/30 transition-all px-3"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Download APA
+                        </a>
+                      )}
+
+                      {progressiveDealStatus === 'APA_SIGNED' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleInitiateEscrowFromProfile()}
+                          disabled={isInitiatingEscrow || !selectedConversation?.dealOfferId}
+                          className="h-10 px-4 rounded-full bg-white text-black text-[10px] font-black uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-200 transition-all inline-flex items-center gap-2"
+                        >
+                          {isInitiatingEscrow ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              Initiating Escrow...
+                            </>
+                          ) : (
+                            <>
+                              <Link2 className="w-3.5 h-3.5" />
+                              Fund Escrow
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {progressiveDealStatus === 'ESCROW_FUNDED' && (
+                        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-3 space-y-1">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Transfer Checklist</p>
+                          <p className="text-[10px] text-zinc-300">Seller must transfer:</p>
+                          <p className="text-[10px] text-zinc-400">1. Domain EPP/Auth codes.</p>
+                          <p className="text-[10px] text-zinc-400">2. GitHub admin ownership.</p>
+                          <p className="text-[10px] text-zinc-400">3. Stripe ownership transfer.</p>
+                        </div>
+                      )}
+
+                      {(progressiveDealStatus === 'ACCEPTED' || progressiveDealStatus === 'LOI_SIGNED' || progressiveDealStatus === 'DUE_DILIGENCE') && (
+                        <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Exchange Signed Documents</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-[90px,1fr] gap-2">
+                            <select
+                              value={signedDocType}
+                              onChange={(event) => setSignedDocType(event.target.value as 'LOI' | 'APA' | 'DOC')}
+                              className="h-9 rounded-lg border border-white/10 bg-black/40 px-2 text-[10px] font-black uppercase tracking-widest text-zinc-200 focus:outline-none focus:border-white/25"
+                            >
+                              <option value="LOI">LOI</option>
+                              <option value="APA">APA</option>
+                              <option value="DOC">DOC</option>
+                            </select>
+                            <input
+                              type="url"
+                              value={signedDocUrl}
+                              onChange={(event) => setSignedDocUrl(event.target.value)}
+                              placeholder="https://... signed PDF link"
+                              className="h-9 rounded-lg border border-white/10 bg-black/40 px-3 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/25"
+                            />
+                          </div>
+                          <input
+                            type="text"
+                            value={signedDocNote}
+                            onChange={(event) => setSignedDocNote(event.target.value)}
+                            placeholder="Optional note for counterparty"
+                            className="w-full h-9 rounded-lg border border-white/10 bg-black/40 px-3 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/25"
+                          />
+                          <button
+                            type="button"
+                            disabled={isSendingMessage || !signedDocUrl.trim()}
+                            onClick={() => void handleShareSignedDocument()}
+                            className="h-9 px-4 rounded-full bg-white text-black text-[10px] font-black uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-200 transition-all inline-flex items-center gap-2"
+                          >
+                            <Link2 className="w-3.5 h-3.5" />
+                            {isSendingMessage ? 'Sharing' : 'Share Signed Doc'}
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="rounded-2xl border border-white/10 bg-black/40 px-3 py-4 space-y-3 max-h-[360px] overflow-y-auto no-scrollbar">
@@ -752,7 +1125,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                                 : 'bg-white/[0.05] border-white/10 text-zinc-100'
                             }`}
                           >
-                            <p className="whitespace-pre-wrap break-words">{message.body}</p>
+                            <p className="whitespace-pre-wrap break-words">{linkifyMessageBody(message.body)}</p>
                             <p className="mt-2 text-[9px] uppercase tracking-widest text-zinc-500">
                               {formatRelativeTime(message.createdAt)}
                             </p>
@@ -833,6 +1206,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
 
                       {items.map((item: any) => {
                         const nextStage = nextStageFor(item.stage as AcquireStage);
+                        const dealStatusForItem = toDealRoomStatusFromAcquireStage(item.stage as AcquireStage);
 
                         return (
                           <div key={item.id} className="rounded-xl border border-white/10 bg-black/40 px-3 py-3 space-y-3">
@@ -852,6 +1226,60 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                             </div>
 
                             <p className="text-xs text-zinc-400 line-clamp-2">{item.listing.tagline}</p>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              {dealStatusForItem === 'PENDING' && (
+                                <div className="h-7 px-3 rounded-full border border-white/10 bg-black/40 text-[9px] font-black uppercase tracking-widest text-zinc-500 inline-flex items-center gap-1.5">
+                                  <Lock className="w-3 h-3" />
+                                  {LOCKED_STEP_COPY}
+                                </div>
+                              )}
+                              {(dealStatusForItem === 'ACCEPTED' || dealStatusForItem === 'LOI_SIGNED') && (
+                                <a
+                                  href={DEAL_DOC_LINKS.loi}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="h-7 px-3 rounded-full border border-white/15 bg-white/[0.02] text-[9px] font-black uppercase tracking-widest text-zinc-300 hover:border-white/30 transition-all inline-flex items-center gap-1.5"
+                                >
+                                  <FileText className="w-3 h-3" />
+                                  Download LOI
+                                </a>
+                              )}
+                              {dealStatusForItem === 'LOI_SIGNED' && (
+                                <div className="h-7 px-3 rounded-full border border-cyan-500/25 bg-cyan-500/10 text-[9px] font-black uppercase tracking-widest text-cyan-200 inline-flex items-center gap-1.5">
+                                  Due Diligence Checklist
+                                </div>
+                              )}
+                              {dealStatusForItem === 'DUE_DILIGENCE' && (
+                                <a
+                                  href={DEAL_DOC_LINKS.apa}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="h-7 px-3 rounded-full border border-white/15 bg-white/[0.02] text-[9px] font-black uppercase tracking-widest text-zinc-300 hover:border-white/30 transition-all inline-flex items-center gap-1.5"
+                                >
+                                  <FileText className="w-3 h-3" />
+                                  Download APA
+                                </a>
+                              )}
+                              {dealStatusForItem === 'APA_SIGNED' && (
+                                <div className="h-7 px-3 rounded-full border border-white/15 bg-white/[0.02] text-[9px] font-black uppercase tracking-widest text-zinc-300 inline-flex items-center gap-1.5">
+                                  Open Inbox to Fund Escrow
+                                </div>
+                              )}
+                              {dealStatusForItem === 'ESCROW_FUNDED' && (
+                                <div className="h-7 px-3 rounded-full border border-emerald-500/25 bg-emerald-500/10 text-[9px] font-black uppercase tracking-widest text-emerald-200 inline-flex items-center gap-1.5">
+                                  Transfer Checklist Active
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => void handleContactFromPipeline(item.listingId)}
+                                className="h-7 px-3 rounded-full border border-cyan-500/25 bg-cyan-500/10 text-[9px] font-black uppercase tracking-widest text-cyan-200 hover:border-cyan-400/45 transition-all inline-flex items-center gap-1.5"
+                              >
+                                <Link2 className="w-3 h-3" />
+                                Open Inbox
+                              </button>
+                            </div>
 
                             <div className="flex items-center justify-between gap-2">
                               <button

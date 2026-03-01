@@ -7,8 +7,15 @@
     { "path": "/api/jobs/sync-metrics", "schedule": "0 0 * * *" }
   ],
   "routes": [
+    { "src": "/api/newsletter", "dest": "/api/notifications?scope=newsletter" },
+    { "src": "/api/webhooks/escrow", "dest": "/api/marketplace/offers?scope=escrow-webhook" },
+    { "src": "/api/marketplace/alerts", "dest": "/api/marketplace/assets?scope=alerts" },
     { "src": "/api/marketplace/assets/([^/]+)/connect", "dest": "/api/marketplace/assets-connect?assetId=$1" },
     { "src": "/api/marketplace/assets/([^/]+)/publish", "dest": "/api/marketplace/assets-publish?assetId=$1" },
+    { "src": "/api/marketplace/assets/([^/]+)/financials", "dest": "/api/marketplace/assets-financials?assetId=$1" },
+    { "src": "/api/marketplace/assets/([^/]+)/traffic", "dest": "/api/marketplace/assets-financials?assetId=$1&section=traffic" },
+    { "src": "/api/marketplace/deals/([^/]+)/escrow", "dest": "/api/marketplace/offers?scope=deal-room-escrow&offerId=$1" },
+    { "src": "/api/marketplace/deals/([^/]+)", "dest": "/api/marketplace/offers?scope=deal-room&offerId=$1" },
     { "src": "/api/marketplace/assets/([^/]+)", "dest": "/api/marketplace/assets?assetId=$1" },
     { "src": "/api/marketplace/offers/([^/]+)", "dest": "/api/marketplace/offers?offerId=$1" },
     { "src": "/api/(.*)", "dest": "/api/$1" },

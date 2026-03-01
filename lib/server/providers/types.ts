@@ -18,9 +18,15 @@ export type ProviderMetrics = {
   churn_bps: number | null;
 };
 
+export type ProviderValidationResult = {
+  readOnlyLikely: boolean;
+  warning?: string;
+  providerAccountId?: string | null;
+};
+
 export interface ProviderAdapter {
   provider: ProviderName;
-  validateKey(key: string): Promise<{ readOnlyLikely: boolean; warning?: string }>;
+  validateKey(key: string): Promise<ProviderValidationResult>;
   fetchHistoricalTransactions(key: string, since: Date): AsyncGenerator<NormalizedTransaction>;
   computeMetrics(transactions: NormalizedTransaction[]): Promise<ProviderMetrics> | ProviderMetrics;
 }

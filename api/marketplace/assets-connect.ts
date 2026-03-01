@@ -1,7 +1,7 @@
 import { getMethod, methodNotAllowed, parseJsonBody, sendJson } from '../../lib/server/http.js';
 import { getSupabaseAdmin } from '../../lib/server/supabase-admin.js';
 import { getAuthenticatedUser } from '../../lib/server/auth.js';
-import { sanitizeErrorDetails } from '../../lib/server/marketplace-utils.js';
+import { isRecoverableSchemaError, sanitizeErrorDetails } from '../../lib/server/marketplace-utils.js';
 import { ConnectMarketplaceAssetSchema } from '../../lib/server/marketplace-validation.js';
 import { encryptSecret, keyFingerprint } from '../../lib/server/secrets.js';
 import { getProviderAdapter } from '../../lib/server/providers/index.js';
@@ -19,6 +19,21 @@ const getAssetId = (req: any): string => {
   }
   return '';
 };
+
+const toMetricsPreview = (metrics: {
+  mrr_cents: number;
+  last30d_revenue_cents: number;
+  last30d_growth_bps: number;
+  active_subscribers: number;
+} | null) =>
+  metrics
+    ? {
+        mrrCents: metrics.mrr_cents,
+        last30dRevenueCents: metrics.last30d_revenue_cents,
+        last30dGrowthBps: metrics.last30d_growth_bps,
+        activeSubscribers: metrics.active_subscribers,
+      }
+    : null;
 
 export default async function handler(req: any, res: any) {
   try {
@@ -118,10 +133,129 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    const providerAccountId = String(validation.providerAccountId ?? '').trim() || null;
+    if ((payload.provider === 'stripe' || payload.provider === 'dodo') && !providerAccountId) {
+      return sendJson(res, 400, {
+        error: 'Unable to resolve payment account id from this key.',
+        details: 'Use a valid key with read access to account metadata and retry.',
+      });
+    }
+
+    if (providerAccountId) {
+      const existingConnectionResult = await supabase
+        .from('payment_connections')
+        .select('id, owner_user_id, asset_id, provider')
+        .eq('provider', payload.provider)
+        .eq('provider_account_id', providerAccountId)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingConnectionResult.error) {
+        if (isRecoverableSchemaError(existingConnectionResult.error)) {
+          return sendJson(res, 503, {
+            error: 'Connection gatekeeping schema is not ready yet.',
+            details: 'Run the latest Supabase migration to enable provider account gatekeeping.',
+          });
+        }
+        throw existingConnectionResult.error;
+      }
+
+      const existingConnection = existingConnectionResult.data;
+      if (existingConnection && existingConnection.owner_user_id !== user.id) {
+        await writeMarketplaceAuditLog({
+          actorUserId: user.id,
+          assetId: asset.id,
+          action: 'payment_connection_blocked_account_claim',
+          severity: 'BLOCK',
+          reason: 'PROVIDER_ACCOUNT_ALREADY_CLAIMED',
+          metadata: {
+            provider: payload.provider,
+            provider_account_id: providerAccountId,
+            existing_asset_id: existingConnection.asset_id,
+            existing_owner_user_id: existingConnection.owner_user_id,
+          },
+        });
+
+        return sendJson(res, 403, {
+          error: 'This payment account is already linked to another VibeJam listing.',
+          code: 'PROVIDER_ACCOUNT_ALREADY_LINKED',
+        });
+      }
+
+      if (existingConnection && existingConnection.owner_user_id === user.id && existingConnection.asset_id !== asset.id) {
+        let verifiedStatus: 'pending' | 'verified' = 'pending';
+        let metrics: {
+          mrrCents: number;
+          last30dRevenueCents: number;
+          last30dGrowthBps: number;
+          activeSubscribers: number;
+        } | null = null;
+
+        try {
+          const syncResult = await syncConnectionById(existingConnection.id);
+          if (syncResult.ok) {
+            verifiedStatus = 'verified';
+            metrics = toMetricsPreview(syncResult.metrics);
+          }
+        } catch {
+          // Keep response non-blocking; background sync will continue retries.
+        }
+
+        const existingAssetResult = await supabase
+          .from('marketplace_assets')
+          .select('id,slug,verified_status,mrr_cents,last30d_revenue_cents,last30d_growth_bps')
+          .eq('id', existingConnection.asset_id)
+          .limit(1)
+          .maybeSingle();
+
+        if (existingAssetResult.error) {
+          throw existingAssetResult.error;
+        }
+
+        const existingAsset = existingAssetResult.data;
+        await writeMarketplaceAuditLog({
+          actorUserId: user.id,
+          assetId: existingConnection.asset_id,
+          action: 'payment_connection_reused_existing_asset',
+          metadata: {
+            provider: payload.provider,
+            provider_account_id: providerAccountId,
+            requested_asset_id: asset.id,
+            linked_asset_id: existingConnection.asset_id,
+          },
+        });
+
+        return sendJson(res, 200, {
+          data: {
+            connection: {
+              id: existingConnection.id,
+              provider: payload.provider,
+              reused: true,
+            },
+            verifiedStatus: existingAsset?.verified_status === 'verified' ? 'verified' : verifiedStatus,
+            warning: validation.warning,
+            providerAccountId,
+            metrics:
+              metrics
+              ?? (existingAsset
+                ? {
+                    mrrCents: Math.max(0, Number(existingAsset.mrr_cents ?? 0)),
+                    last30dRevenueCents: Math.max(0, Number(existingAsset.last30d_revenue_cents ?? 0)),
+                    last30dGrowthBps: Math.round(Number(existingAsset.last30d_growth_bps ?? 0)),
+                    activeSubscribers: 0,
+                  }
+                : null),
+            existingAssetId: existingAsset?.id ?? existingConnection.asset_id,
+            existingAssetSlug: existingAsset?.slug ?? null,
+          },
+        });
+      }
+    }
+
     const encrypted = encryptSecret(payload.apiKey);
     const fingerprint = keyFingerprint(payload.apiKey);
 
-    const { data: connection, error: upsertError } = await supabase
+    const upsertConnectionResult = await supabase
       .from('payment_connections')
       .upsert(
         {
@@ -130,6 +264,7 @@ export default async function handler(req: any, res: any) {
           provider: payload.provider,
           encrypted_api_key: encrypted,
           key_fingerprint: fingerprint,
+          provider_account_id: providerAccountId,
           status: 'active',
           status_message: validation.warning ?? null,
           failure_count: 0,
@@ -143,9 +278,16 @@ export default async function handler(req: any, res: any) {
       .select('id, key_fingerprint, status, provider, status_message')
       .single();
 
-    if (upsertError) {
-      throw upsertError;
+    if (upsertConnectionResult.error) {
+      if (isRecoverableSchemaError(upsertConnectionResult.error)) {
+        return sendJson(res, 503, {
+          error: 'Connection schema is not ready yet.',
+          details: 'Run the latest Supabase migration to enable provider account gatekeeping.',
+        });
+      }
+      throw upsertConnectionResult.error;
     }
+    const connection = upsertConnectionResult.data;
 
     const { error: assetUpdateError } = await supabase
       .from('marketplace_assets')
@@ -166,6 +308,7 @@ export default async function handler(req: any, res: any) {
       metadata: {
         provider: payload.provider,
         key_fingerprint: fingerprint,
+        provider_account_id: providerAccountId,
         warning: validation.warning,
       },
     });
@@ -178,18 +321,13 @@ export default async function handler(req: any, res: any) {
       activeSubscribers: number;
     } | null = null;
 
-    // Stripe sync is fast/reliable enough for immediate metrics preview.
-    if (payload.provider === 'stripe') {
+    // Stripe/Dodo sync is usually fast enough for immediate metrics preview.
+    if (payload.provider === 'stripe' || payload.provider === 'dodo') {
       try {
         const syncResult = await syncConnectionById(connection.id);
         if (syncResult.ok) {
           verifiedStatus = 'verified';
-          metrics = {
-            mrrCents: syncResult.metrics.mrr_cents,
-            last30dRevenueCents: syncResult.metrics.last30d_revenue_cents,
-            last30dGrowthBps: syncResult.metrics.last30d_growth_bps,
-            activeSubscribers: syncResult.metrics.active_subscribers,
-          };
+          metrics = toMetricsPreview(syncResult.metrics);
         }
       } catch {
         // Leave pending; cron sync will retry and update status.
@@ -201,6 +339,7 @@ export default async function handler(req: any, res: any) {
         connection,
         verifiedStatus,
         warning: validation.warning,
+        providerAccountId,
         metrics,
       },
     });

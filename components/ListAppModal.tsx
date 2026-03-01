@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -58,6 +58,10 @@ const TIER_ID_MAP = {
   Elite: 'elite',
 } as const;
 
+const BOOST_TIERS_RESTORE_WORD = 'AURORA_RESTORE';
+const hasPaidBoostsUnlocked = () =>
+  String(import.meta.env.VITE_MARKETPLACE_BOOSTS_UNLOCK_WORD ?? '').trim() === BOOST_TIERS_RESTORE_WORD;
+
 type PendingBoostCheckout = {
   tier: 'free' | 'pro' | 'elite';
   sessionId: string;
@@ -70,19 +74,23 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
   const [selectedTier, setSelectedTier] = useState<'Free' | 'Pro' | 'Elite'>('Free');
   const [showAnonymityTooltip, setShowAnonymityTooltip] = useState(false);
   const [showStripeKeyTooltip, setShowStripeKeyTooltip] = useState(false);
+  const [paidBoostsEnabled] = useState<boolean>(() => hasPaidBoostsUnlocked());
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [draftAssetId, setDraftAssetId] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
+  const [iconUploadError, setIconUploadError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingBoostCheckout, setPendingBoostCheckout] = useState<PendingBoostCheckout | null>(null);
+  const iconFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
     pitch: '',
     category: 'SaaS' as string,
     icon: '💎',
+    logoUrl: '',
     founderName: '',
     founderEmail: '',
     askingPrice: '',
@@ -95,6 +103,19 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
     setStatusMessage(null);
     setErrorMessage(null);
   };
+
+  const visibleBoostTiers = paidBoostsEnabled
+    ? BOOST_TIERS
+    : BOOST_TIERS.filter((tier) => tier.id === 'Free');
+
+  useEffect(() => {
+    if (!paidBoostsEnabled && selectedTier !== 'Free') {
+      setSelectedTier('Free');
+    }
+    if (!paidBoostsEnabled) {
+      setPendingBoostCheckout(null);
+    }
+  }, [paidBoostsEnabled, selectedTier]);
 
   const nextStep = () => {
     resetMessages();
@@ -119,6 +140,7 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       name: formData.name,
       tagline: formData.pitch || `${formData.name} is now open for acquisition.`,
       description: formData.pitch || `${formData.name} is now open for acquisition.`,
+      logoUrl: formData.logoUrl.trim(),
       category: formData.category,
       founderName: formData.founderName,
       founderEmail: formData.founderEmail,
@@ -192,7 +214,7 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
     try {
       const assetId = await ensureDraft();
 
-      const selectedTierId = TIER_ID_MAP[selectedTier];
+      const selectedTierId = paidBoostsEnabled ? TIER_ID_MAP[selectedTier] : 'free';
       const publishResult = await publishMarketplaceAsset(assetId, {
         askingPriceUsd: formData.askingPrice,
         profitMarginPercent: Number.isFinite(formData.profitMargin) ? formData.profitMargin : null,
@@ -240,7 +262,7 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
         rank: 'NEW',
         name: formData.isAnonymous ? 'Anonymous Asset' : formData.name,
         pitch: formData.pitch,
-        icon: formData.isAnonymous ? '🛡️' : formData.icon,
+        icon: formData.isAnonymous ? '🛡️' : (formData.logoUrl.trim() || formData.icon),
         accentColor: '212, 175, 55',
         monthlyRevenue: Math.max(0, Math.round(publishResult.mrrCents / 100)),
         lifetimeRevenue: Math.max(0, Math.round((publishResult.last30dRevenueCents * 12) / 100)),
@@ -276,6 +298,42 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to publish listing.');
       setIsSubmitting(false);
     }
+  };
+
+  const handleIconFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setIconUploadError('Please upload an image file (PNG, JPG, WEBP, or SVG).');
+      event.target.value = '';
+      return;
+    }
+
+    const maxBytes = 3 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      setIconUploadError('Icon is too large. Please keep it under 3MB.');
+      event.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      if (!result.startsWith('data:image/')) {
+        setIconUploadError('Unable to process this image. Try another file.');
+        return;
+      }
+      setIconUploadError(null);
+      setFormData((prev) => ({ ...prev, logoUrl: result }));
+    };
+    reader.onerror = () => {
+      setIconUploadError('Unable to read this file. Try again.');
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
   };
 
   const InstructionGuide = ({ title, link, guide }: { title: string; link: string; guide: React.ReactNode }) => (
@@ -316,6 +374,70 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
           <AnimatePresence mode="wait">
             {step === 1 && (
               <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-10">
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">App Icon (iOS style)</label>
+                  <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-5 sm:p-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+                      <button
+                        type="button"
+                        onClick={() => iconFileInputRef.current?.click()}
+                        className="group relative h-24 w-24 shrink-0 overflow-hidden rounded-[22px] border border-white/15 bg-white/[0.04] shadow-[0_10px_30px_rgba(0,0,0,0.35)] hover:border-yellow-500/40 transition-all"
+                      >
+                        {formData.logoUrl ? (
+                          <img src={formData.logoUrl} alt="App icon preview" className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-4xl text-zinc-500">◇</div>
+                        )}
+                        <div className="pointer-events-none absolute inset-0 rounded-[22px] ring-1 ring-inset ring-white/10 group-hover:ring-yellow-500/40 transition-all" />
+                      </button>
+
+                      <div className="min-w-0 flex-1 space-y-3">
+                        <input
+                          ref={iconFileInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                          onChange={handleIconFileChange}
+                          className="hidden"
+                        />
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => iconFileInputRef.current?.click()}
+                            className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-yellow-300 hover:bg-yellow-500/20 transition-all"
+                          >
+                            Upload Icon
+                          </button>
+                          {formData.logoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setFormData((prev) => ({ ...prev, logoUrl: '' }))}
+                              className="rounded-full border border-white/15 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-white hover:border-white/30 transition-all"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+                          Recommended 1024x1024 PNG/JPG/WEBP/SVG · Max 3MB
+                        </p>
+                        <input
+                          type="url"
+                          placeholder="Or paste icon URL (https://...)"
+                          value={formData.logoUrl.startsWith('data:image/') ? '' : formData.logoUrl}
+                          onChange={(e) => {
+                            setIconUploadError(null);
+                            setFormData((prev) => ({ ...prev, logoUrl: e.target.value.trim() }));
+                          }}
+                          className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-yellow-500/40"
+                        />
+                      </div>
+                    </div>
+                    {iconUploadError && (
+                      <p className="mt-3 text-xs text-red-300">{iconUploadError}</p>
+                    )}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-3">
                     <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Project Name</label>
@@ -616,11 +738,15 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
 
                 <div className="text-center mb-6">
                   <h4 className="text-white font-bold text-xl mb-2">Boost Your Listing</h4>
-                  <p className="text-zinc-500 text-sm">Select a tier to reach thousands of accredited buyers faster.</p>
+                  <p className="text-zinc-500 text-sm">
+                    {paidBoostsEnabled
+                      ? 'Select a tier to reach thousands of accredited buyers faster.'
+                      : 'Free listing access is currently active for all sellers.'}
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {BOOST_TIERS.map((tier) => (
+                <div className={`grid grid-cols-1 ${paidBoostsEnabled ? 'md:grid-cols-3' : 'md:grid-cols-1'} gap-6`}>
+                  {visibleBoostTiers.map((tier) => (
                     <button
                       key={tier.id}
                       onClick={() => {
@@ -646,6 +772,12 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                     </button>
                   ))}
                 </div>
+
+                {!paidBoostsEnabled && (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-xs text-zinc-400 text-center">
+                    Pro and Elite boosts are temporarily unavailable during the free-listing rollout.
+                  </div>
+                )}
 
                 <div className="p-8 rounded-[32px] bg-black border border-white/5 flex items-center justify-between">
                   <div className="flex items-center gap-4">

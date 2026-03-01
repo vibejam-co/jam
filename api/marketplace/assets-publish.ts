@@ -4,6 +4,7 @@ import { getAuthenticatedUser } from '../../lib/server/auth.js';
 import {
   computeValuationMultipleX100,
   isRecoverableSchemaError,
+  normalizeWebsiteUrl,
   parseUsdToCents,
   sanitizeErrorDetails,
 } from '../../lib/server/marketplace-utils.js';
@@ -11,6 +12,7 @@ import { PublishMarketplaceAssetSchema } from '../../lib/server/marketplace-vali
 import { writeMarketplaceAuditLog } from '../../lib/server/marketplace-audit.js';
 import { createDodoCheckoutSession, getDodoCheckoutSession } from '../../lib/server/dodo-payments.js';
 import { syncConnectionById } from '../../lib/server/marketplace-sync.js';
+import { sendBuyerDealAlertEmail } from '../../lib/server/email.js';
 
 const ACTIVE_SELECT = [
   'id',
@@ -19,6 +21,7 @@ const ACTIVE_SELECT = [
   'jam_id',
   'title',
   'name',
+  'website_url',
   'listing_status',
   'domain_visibility',
   'asking_price_cents',
@@ -54,6 +57,10 @@ const BOOST_TIER_PRICE_CENTS: Record<'free' | 'pro' | 'elite', number> = {
   pro: 4900,
   elite: 29900,
 };
+
+const BOOST_TIERS_RESTORE_WORD = 'AURORA_RESTORE';
+const paidBoostsEnabled = () =>
+  String(process.env.MARKETPLACE_BOOSTS_UNLOCK_WORD ?? '').trim() === BOOST_TIERS_RESTORE_WORD;
 
 const requiresPaidBoost = (tier: 'free' | 'pro' | 'elite') => tier === 'pro' || tier === 'elite';
 
@@ -141,6 +148,110 @@ const normalizeAssetName = (value: unknown): string =>
     .toLowerCase()
     .replace(/\s+/g, ' ');
 
+const toNonNegativeInt = (value: unknown): number => {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Math.max(0, Math.round(numeric));
+};
+
+const isUniqueViolation = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const code = 'code' in error ? String((error as { code?: unknown }).code ?? '') : '';
+  return code === '23505';
+};
+
+const notifyMatchingBuyerAlerts = async (input: {
+  supabase: any;
+  asset: any;
+  assetId: string;
+}) => {
+  const mrrCents = toNonNegativeInt(input.asset?.mrr_cents);
+  const askingPriceCents = toNonNegativeInt(input.asset?.asking_price_cents);
+  const profitMarginBps = toNonNegativeInt(input.asset?.profit_margin_bps);
+  const visibility = String(input.asset?.visibility ?? '').toLowerCase();
+
+  if (visibility === 'private') {
+    return;
+  }
+
+  const { data: matchedAlerts, error: alertError } = await input.supabase
+    .from('buyer_alerts')
+    .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps')
+    .lte('min_mrr_cents', mrrCents)
+    .lte('min_profit_margin_bps', profitMarginBps)
+    .or(`max_price_cents.is.null,max_price_cents.gte.${askingPriceCents}`);
+
+  if (alertError) {
+    if (isRecoverableSchemaError(alertError)) {
+      return;
+    }
+    throw alertError;
+  }
+
+  const alerts = Array.isArray(matchedAlerts) ? matchedAlerts : [];
+  if (alerts.length === 0) {
+    return;
+  }
+
+  const uniqueRecipients = new Map<string, string>();
+  for (const row of alerts) {
+    const email = String(row?.email ?? '').trim().toLowerCase();
+    if (!email || uniqueRecipients.has(email)) {
+      continue;
+    }
+    uniqueRecipients.set(email, email);
+  }
+
+  if (uniqueRecipients.size === 0) {
+    return;
+  }
+
+  const appBaseUrl = process.env.APP_BASE_URL?.trim() || 'https://www.vibejam.co';
+  const dealUrl = `${appBaseUrl.replace(/\/+$/, '')}/`;
+  const assetName = String(input.asset?.name ?? input.asset?.title ?? 'Untitled Asset').trim() || 'Untitled Asset';
+
+  const sendResults = await Promise.allSettled(
+    Array.from(uniqueRecipients.values()).map((toEmail) =>
+      sendBuyerDealAlertEmail({
+        toEmail,
+        assetName,
+        mrrCents,
+        askingPriceCents,
+        profitMarginBps,
+        dealUrl,
+      }),
+    ),
+  );
+
+  const sentCount = sendResults.filter(
+    (result) => result.status === 'fulfilled' && result.value?.sent === true,
+  ).length;
+  const skippedCount = sendResults.filter(
+    (result) => result.status === 'fulfilled' && result.value?.sent !== true,
+  ).length;
+  const failedCount = sendResults.filter((result) => result.status === 'rejected').length;
+
+  await writeMarketplaceAuditLog({
+    actorUserId: null,
+    assetId: input.assetId,
+    action: 'buyer_alerts_notified',
+    metadata: {
+      matched_alerts: alerts.length,
+      recipient_count: uniqueRecipients.size,
+      sent_count: sentCount,
+      skipped_count: skippedCount,
+      failed_count: failedCount,
+      mrr_cents: mrrCents,
+      asking_price_cents: askingPriceCents,
+      profit_margin_bps: profitMarginBps,
+    },
+  });
+};
+
 export default async function handler(req: any, res: any) {
   try {
     if (getMethod(req) !== 'POST') {
@@ -167,6 +278,7 @@ export default async function handler(req: any, res: any) {
     }
 
     const payload = parsed.data;
+    const effectiveTier: 'free' | 'pro' | 'elite' = paidBoostsEnabled() ? payload.tier : 'free';
     const askingPriceCents = typeof payload.askingPriceCents === 'number'
       ? payload.askingPriceCents
       : parseUsdToCents(payload.askingPriceUsd ?? '');
@@ -202,6 +314,63 @@ export default async function handler(req: any, res: any) {
       return sendJson(res, 404, { error: 'Asset not found.' });
     }
 
+    const normalizedAssetWebsite = normalizeWebsiteUrl(asset.website_url);
+    if (normalizedAssetWebsite) {
+      const activeRowsSelectPrimary = 'id,slug,owner_user_id,website_url,is_listed,listing_status';
+      const activeRowsSelectFallback = 'id,slug,owner_user_id,website_url,is_listed';
+      let activeRowsResult = await supabase
+        .from('marketplace_assets')
+        .select(activeRowsSelectPrimary)
+        .neq('id', asset.id)
+        .not('website_url', 'is', null)
+        .limit(1000);
+
+      if (activeRowsResult.error && isRecoverableSchemaError(activeRowsResult.error)) {
+        activeRowsResult = await supabase
+          .from('marketplace_assets')
+          .select(activeRowsSelectFallback)
+          .neq('id', asset.id)
+          .not('website_url', 'is', null)
+          .limit(1000);
+      }
+
+      if (activeRowsResult.error) {
+        throw activeRowsResult.error;
+      }
+
+      const duplicateWebsiteRow = (Array.isArray(activeRowsResult.data) ? activeRowsResult.data : []).find((row: any) => {
+        const listingStatus = String(row.listing_status ?? '').toUpperCase();
+        const isActive = row.is_listed === true || listingStatus === 'LISTED' || listingStatus === 'LIVE';
+        if (!isActive) {
+          return false;
+        }
+        return normalizeWebsiteUrl(row.website_url) === normalizedAssetWebsite;
+      });
+
+      if (duplicateWebsiteRow) {
+        await writeMarketplaceAuditLog({
+          actorUserId: user.id,
+          assetId: asset.id,
+          action: 'publish_blocked_duplicate_website',
+          severity: 'BLOCK',
+          reason: 'WEBSITE_ALREADY_CLAIMED',
+          metadata: {
+            website_url: normalizedAssetWebsite,
+            duplicate_asset_id: duplicateWebsiteRow.id,
+            duplicate_slug: duplicateWebsiteRow.slug ?? null,
+            duplicate_owner_user_id: duplicateWebsiteRow.owner_user_id ?? null,
+          },
+        });
+
+        return sendJson(res, 409, {
+          error: 'This website is already linked to another active listing.',
+          code: 'WEBSITE_ALREADY_CLAIMED',
+          existingAssetId: duplicateWebsiteRow.id,
+          existingSlug: duplicateWebsiteRow.slug ?? null,
+        });
+      }
+    }
+
     const siblingSelectPrimary = 'id,slug,name,jam_id,is_listed,listing_status';
     const siblingSelectFallback = 'id,slug,name,jam_id,is_listed';
     let siblingsResult = await supabase
@@ -224,7 +393,8 @@ export default async function handler(req: any, res: any) {
 
     const assetNameNormalized = normalizeAssetName(asset.name);
     const duplicateListedRow = (Array.isArray(siblingsResult.data) ? siblingsResult.data : []).find((row: any) => {
-      const isActive = row.is_listed === true || row.listing_status === 'LISTED';
+      const listingStatus = String(row.listing_status ?? '').toUpperCase();
+      const isActive = row.is_listed === true || listingStatus === 'LISTED' || listingStatus === 'LIVE';
       if (!isActive) {
         return false;
       }
@@ -286,8 +456,8 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    if (requiresPaidBoost(payload.tier)) {
-      const tier = payload.tier;
+    if (requiresPaidBoost(effectiveTier)) {
+      const tier = effectiveTier;
       const checkoutSessionId = payload.boostCheckoutSessionId?.trim() ?? '';
       let dodoConfig: { apiKey: string; productId: string };
 
@@ -490,14 +660,20 @@ export default async function handler(req: any, res: any) {
     const { error: publishError } = publishResult;
 
     if (publishError) {
+      if (isUniqueViolation(publishError)) {
+        return sendJson(res, 409, {
+          error: 'This website is already linked to another listing.',
+          code: 'WEBSITE_ALREADY_CLAIMED',
+        });
+      }
       throw publishError;
     }
 
-    const boostWindow = getBoostWindow(payload.tier);
+    const boostWindow = getBoostWindow(effectiveTier);
 
     const { error: boostError } = await supabase.from('boosts').insert({
       asset_id: asset.id,
-      tier: payload.tier,
+      tier: effectiveTier,
       starts_at: boostWindow.startsAt,
       ends_at: boostWindow.endsAt,
     });
@@ -540,10 +716,27 @@ export default async function handler(req: any, res: any) {
       metadata: {
         asking_price_cents: askingPriceCents,
         valuation_multiple_x100: valuationMultipleX100,
-        tier: payload.tier,
+        tier: effectiveTier,
         visibility: payload.visibility ?? 'public',
         missing_active_connection: missingActiveConnection,
       },
+    });
+
+    void notifyMatchingBuyerAlerts({
+      supabase,
+      asset: assetSnapshot,
+      assetId: asset.id,
+    }).catch(async (alertError) => {
+      await writeMarketplaceAuditLog({
+        actorUserId: null,
+        assetId: asset.id,
+        action: 'buyer_alerts_notify_failed',
+        severity: 'WARN',
+        reason: 'BUYER_ALERTS_NOTIFY_FAILED',
+        metadata: {
+          details: sanitizeErrorDetails(alertError),
+        },
+      });
     });
 
     return sendJson(res, 200, {
@@ -553,7 +746,7 @@ export default async function handler(req: any, res: any) {
         slug: assetSnapshot.slug,
         askingPriceCents,
         valuationMultipleX100,
-        tier: payload.tier,
+        tier: effectiveTier,
         visibility: payload.visibility ?? 'public',
         verifiedStatus: assetSnapshot.verified_status,
         mrrCents: Number(assetSnapshot.mrr_cents ?? 0),

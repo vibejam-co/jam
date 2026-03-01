@@ -320,10 +320,18 @@ export const stripeAdapter: ProviderAdapter = {
       throw new Error('Stripe key must be a live restricted key (rk_live_...).');
     }
 
-    await stripeRequest('/balance', key);
+    const [account, _balance] = await Promise.all([
+      stripeRequest('/account', key),
+      stripeRequest('/balance', key),
+    ]);
+    const accountId = String(account?.id ?? '').trim();
+    if (!accountId) {
+      throw new Error('Stripe account id could not be resolved from this key.');
+    }
 
     return {
       readOnlyLikely: true,
+      providerAccountId: accountId,
     };
   },
 
