@@ -24,6 +24,7 @@ import {
   FolderOpen,
   Lock,
   Loader2,
+  Trash2,
 } from 'lucide-react';
 import { VibeApp, MarketplaceOwnerAsset, AcquireStage, DealRoomData, DealRoomStatus } from '../types';
 import GemstoneIcon from './GemstoneIcon';
@@ -53,12 +54,14 @@ interface ProfileViewProps {
   isSigningOut?: boolean;
   focusConversationId?: string | null;
   onFocusConversationHandled?: () => void;
+  onDeleteJam?: (app: VibeApp) => Promise<void> | void;
+  onListJamOnMarketplace?: (app: VibeApp) => Promise<void> | void;
 }
 
 type ProfileTab = 'Inbox' | 'Acquire' | 'Wishlist' | 'My Jams' | 'Settings';
 type ProfileMode = 'buyer' | 'seller';
 
-const ACQUIRE_STAGE_ORDER: AcquireStage[] = [
+const ACQUIRE_PROGRESS_ORDER: AcquireStage[] = [
   'WATCHLISTED',
   'OFFER_SENT',
   'LOI_SIGNED',
@@ -67,6 +70,7 @@ const ACQUIRE_STAGE_ORDER: AcquireStage[] = [
   'ESCROW_FUNDED',
   'CLOSED',
 ];
+const ACQUIRE_STAGE_ORDER: AcquireStage[] = ACQUIRE_PROGRESS_ORDER.filter((stage) => stage !== 'WATCHLISTED');
 
 const formatMoney = (cents: number) => {
   const value = Number(cents ?? 0) / 100;
@@ -136,25 +140,25 @@ const getInitials = (value: string): string => {
 };
 
 const nextStageFor = (stage: AcquireStage): AcquireStage | null => {
-  const index = ACQUIRE_STAGE_ORDER.indexOf(stage);
-  if (index === -1 || index >= ACQUIRE_STAGE_ORDER.length - 1) {
+  const index = ACQUIRE_PROGRESS_ORDER.indexOf(stage);
+  if (index === -1 || index >= ACQUIRE_PROGRESS_ORDER.length - 1) {
     return null;
   }
-  return ACQUIRE_STAGE_ORDER[index + 1];
+  return ACQUIRE_PROGRESS_ORDER[index + 1];
 };
 
 const stageButtonLabel = (stage: AcquireStage): string => {
   switch (stage) {
     case 'OFFER_SENT':
-      return 'Move to Offer';
+      return 'Move to Offer Sent';
     case 'LOI_SIGNED':
-      return 'Move to LOI';
+      return 'Move to LOI Signed';
     case 'DUE_DILIGENCE':
       return 'Move to Due Diligence';
     case 'APA_SIGNED':
-      return 'Move to APA';
+      return 'Move to APA Signed';
     case 'ESCROW_FUNDED':
-      return 'Move to Escrow';
+      return 'Move to Escrow Funded';
     case 'CLOSED':
       return 'Mark Closed';
     default:
@@ -245,6 +249,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   isSigningOut = false,
   focusConversationId = null,
   onFocusConversationHandled,
+  onDeleteJam,
+  onListJamOnMarketplace,
 }) => {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Inbox');
   const [profileMode, setProfileMode] = useState<ProfileMode>('buyer');
@@ -273,6 +279,9 @@ const ProfileView: React.FC<ProfileViewProps> = ({
 
   const [myMarketplaceAssets, setMyMarketplaceAssets] = useState<MarketplaceOwnerAsset[]>([]);
   const [editingListingSeed, setEditingListingSeed] = useState<ListingEditSeed | null>(null);
+  const [jamActionError, setJamActionError] = useState<string | null>(null);
+  const [listingJamId, setListingJamId] = useState<string | null>(null);
+  const [deletingJamId, setDeletingJamId] = useState<string | null>(null);
 
   const profileModeStorageKey = useMemo(
     () => `vibejam:profile-mode:${String(handle || displayName || 'guest').trim().toLowerCase()}`,
@@ -375,6 +384,20 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       window.removeEventListener('profile:refresh-marketplace', handleRefresh as EventListener);
     };
   }, []);
+
+  useEffect(() => {
+    if (profileMode !== 'buyer' || activeTab !== 'Acquire') {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void Promise.allSettled([refreshPipeline(), refreshConversations(), refreshSummary()]);
+    }, 8000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activeTab, profileMode]);
 
   useEffect(() => {
     if (!focusConversationId) {
@@ -693,6 +716,52 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     isAnonymous: asset.isAnonymous,
     visibility: asset.visibility,
   });
+
+  const handleListJamOnMarketplace = async (app: VibeApp) => {
+    if (!onListJamOnMarketplace || listingJamId || deletingJamId) {
+      return;
+    }
+
+    const jamId = String(app.id ?? '').trim();
+    if (!jamId) {
+      setJamActionError('Missing jam id. Unable to publish this jam to Marketplace.');
+      return;
+    }
+
+    setJamActionError(null);
+    setListingJamId(jamId);
+    try {
+      await onListJamOnMarketplace(app);
+      await Promise.allSettled([refreshAll({ silent: true })]);
+    } catch (error) {
+      setJamActionError(error instanceof Error ? error.message : 'Failed to list jam on Marketplace.');
+    } finally {
+      setListingJamId(null);
+    }
+  };
+
+  const handleDeleteJam = async (app: VibeApp) => {
+    if (!onDeleteJam || deletingJamId || listingJamId) {
+      return;
+    }
+
+    const jamId = String(app.id ?? '').trim();
+    if (!jamId) {
+      setJamActionError('Missing jam id. Unable to delete this jam.');
+      return;
+    }
+
+    setJamActionError(null);
+    setDeletingJamId(jamId);
+    try {
+      await onDeleteJam(app);
+      await Promise.allSettled([refreshAll({ silent: true })]);
+    } catch (error) {
+      setJamActionError(error instanceof Error ? error.message : 'Failed to delete jam.');
+    } finally {
+      setDeletingJamId(null);
+    }
+  };
 
   return (
     <motion.div
@@ -1401,6 +1470,45 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                         </div>
                         <Rocket className="w-4 h-4 text-zinc-500" />
                       </div>
+                      <div className="mb-4 flex flex-wrap items-center gap-2">
+                        {!app.marketplaceAssetId && (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleListJamOnMarketplace(app);
+                            }}
+                            disabled={listingJamId === app.id || deletingJamId !== null}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-cyan-400/35 bg-cyan-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-cyan-200 hover:border-cyan-300/60 hover:text-cyan-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {listingJamId === app.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Rocket className="w-3 h-3" />}
+                            {listingJamId === app.id ? 'Listing...' : 'List on Marketplace'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSelectApp(app);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.03] px-3 py-1 text-[10px] font-black uppercase tracking-widest text-zinc-300 hover:border-white/30 hover:text-white transition-all"
+                        >
+                          <PencilLine className="w-3 h-3" />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDeleteJam(app);
+                          }}
+                          disabled={deletingJamId === app.id || listingJamId !== null}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-red-200 hover:border-red-400/60 hover:text-red-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {deletingJamId === app.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                          {deletingJamId === app.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <p className="text-[8px] font-bold text-zinc-600 uppercase tracking-widest">Revenue</p>
@@ -1414,6 +1522,12 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                     </div>
                   ))}
                 </div>
+
+                {jamActionError && (
+                  <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
+                    {jamActionError}
+                  </div>
+                )}
 
                 {myMarketplaceAssets.length > 0 && (
                   <div className="space-y-4">

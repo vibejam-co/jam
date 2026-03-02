@@ -224,7 +224,13 @@ const loadApps = async (supabase: any) => {
       ?? (appName ? byName.get(appName) : undefined);
 
     if (!matchedListing?.id) {
-      return app;
+      return app.isForSale
+        ? {
+            ...app,
+            isForSale: false,
+            marketplaceAssetId: undefined,
+          }
+        : app;
     }
 
     const listingLogo = String((matchedListing as any)?.logo_url ?? '').trim();
@@ -239,7 +245,6 @@ const loadApps = async (supabase: any) => {
         || (matchedListing as any)?.listing_status === 'LIVE'
         || (matchedListing as any)?.status === 'LISTED'
         || (matchedListing as any)?.status === 'LIVE'
-        || app.isForSale,
       ),
       askingPrice:
         typeof (matchedListing as any)?.asking_price_cents === 'number' && (matchedListing as any).asking_price_cents > 0
@@ -336,7 +341,54 @@ export default async function handler(req: any, res: any) {
       return sendJson(res, 201, { data: apps });
     }
 
-    return methodNotAllowed(res, ['GET', 'POST']);
+    if (method === 'DELETE') {
+      const rawId = req?.query?.id;
+      const jamId = typeof rawId === 'string'
+        ? rawId
+        : Array.isArray(rawId) && typeof rawId[0] === 'string'
+          ? rawId[0]
+          : '';
+
+      if (!jamId) {
+        return sendJson(res, 400, {
+          error: 'Missing jam id.',
+        });
+      }
+
+      const supabase = await getSupabaseAdmin();
+
+      const { error: revenueDeleteError } = await supabase
+        .from('jam_revenue_history')
+        .delete()
+        .eq('jam_id', jamId);
+
+      if (revenueDeleteError && !isRecoverableSchemaError(revenueDeleteError)) {
+        throw revenueDeleteError;
+      }
+
+      const { error: listingDeleteError } = await supabase
+        .from('marketplace_assets')
+        .delete()
+        .eq('jam_id', jamId);
+
+      if (listingDeleteError && !isRecoverableSchemaError(listingDeleteError)) {
+        throw listingDeleteError;
+      }
+
+      const { error: jamDeleteError } = await supabase
+        .from('jams')
+        .delete()
+        .eq('id', jamId);
+
+      if (jamDeleteError) {
+        throw jamDeleteError;
+      }
+
+      const apps = await loadApps(supabase);
+      return sendJson(res, 200, { data: apps });
+    }
+
+    return methodNotAllowed(res, ['GET', 'POST', 'DELETE']);
   } catch (error) {
     return sendJson(res, 500, {
       error: 'Failed to process apps request.',

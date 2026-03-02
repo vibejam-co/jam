@@ -23,6 +23,7 @@ import DealRoomView from './components/DealRoomView';
 import {
   addWishlistItem,
   createMarketplaceAssetDraft,
+  deleteJam,
   fetchApps,
   fetchInboxConversations,
   fetchNotifications,
@@ -117,7 +118,7 @@ const App: React.FC = () => {
   const [quickInboxError, setQuickInboxError] = useState<string | null>(null);
   
   // Legal & Support State
-  const [legalModalTab, setLegalModalTab] = useState<'Terms' | 'Privacy' | 'Support' | null>(null);
+  const [legalModalTab, setLegalModalTab] = useState<'Terms' | 'Privacy' | 'FAQ' | 'Support' | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -349,8 +350,120 @@ const App: React.FC = () => {
       }
       seen.add(key);
       return true;
-    });
+    }).map((app) => ({
+      ...app,
+      isOwnerListing: true,
+    }));
   }, [apps, authEmail, authUser, handle]);
+
+  const publishJamToMarketplace = async (sourceApp: VibeApp) => {
+    if (!authUser) {
+      setLoadError('Sign in to publish this jam to Marketplace.');
+      return;
+    }
+
+    const founderEmail = sourceApp.founder.email ?? authEmail;
+    if (!founderEmail) {
+      setLoadError('Founder email is required to publish this jam to Marketplace.');
+      return;
+    }
+
+    setLoadError(null);
+
+    const askingPriceUsd =
+      sourceApp.marketplaceAskingPriceUsd
+      || sourceApp.askingPrice?.replace(/[^0-9.]/g, '')
+      || String(Math.max(5000, Math.round((sourceApp.monthlyRevenue || 0) * 48)));
+
+    try {
+      const draftResponse = await createMarketplaceAssetDraft({
+        name: sourceApp.name,
+        tagline: sourceApp.pitch || `${sourceApp.name} is now open for acquisition.`,
+        description: sourceApp.solution || sourceApp.pitch || `${sourceApp.name} is now open for acquisition.`,
+        logoUrl: isImageIconSource(sourceApp.icon) ? sourceApp.icon : undefined,
+        category: sourceApp.category,
+        founderName: sourceApp.founder.name,
+        founderEmail,
+        isAnonymous: Boolean(sourceApp.isAnonymous),
+        visibility: sourceApp.marketplaceVisibility ?? 'public',
+        techStack: sourceApp.techStack ?? [],
+        jamId: sourceApp.id,
+      });
+
+      const draftAsset = draftResponse.asset as { id: string } | undefined;
+      if (!draftAsset?.id) {
+        throw new Error('Marketplace draft was created without an asset id.');
+      }
+
+      const publishResponse = await publishMarketplaceAsset(draftAsset.id, {
+        askingPriceUsd,
+        profitMarginPercent: sourceApp.profitMargin ?? null,
+        tier: sourceApp.marketplaceBoostTierId ?? 'free',
+        visibility: sourceApp.marketplaceVisibility ?? 'public',
+      });
+
+      if ('requiresPayment' in publishResponse && publishResponse.requiresPayment) {
+        throw new Error('Boost payment is required before this marketplace listing can go live.');
+      }
+
+      const enrichedApp: VibeApp = {
+        ...sourceApp,
+        isForSale: true,
+        marketplaceAssetId: publishResponse.assetId,
+        askingPrice: `$${askingPriceUsd}`,
+        marketplaceVerifiedStatus: publishResponse.verifiedStatus,
+        valuationMultipleX100: publishResponse.valuationMultipleX100 ?? null,
+        boostTier: 'Free',
+        isOwnerListing: true,
+      };
+
+      setApps((prev) =>
+        prev.map((item) => (item.id === sourceApp.id ? { ...item, ...enrichedApp } : item)),
+      );
+      setSelectedApp((prev) => (prev && prev.id === sourceApp.id ? { ...prev, ...enrichedApp } : prev));
+      setActiveTab('Marketplace');
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('marketplace:refresh'));
+        window.dispatchEvent(new CustomEvent('marketplace:listing-published'));
+        window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
+      }
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? `Marketplace publish failed: ${error.message}`
+          : 'Marketplace publish failed due to an unknown error.',
+      );
+    }
+  };
+
+  const handleDeleteJam = async (app: VibeApp) => {
+    const jamId = String(app.id || '').trim();
+    if (!jamId) {
+      setLoadError('Missing jam id. Unable to delete this jam.');
+      return;
+    }
+
+    setLoadError(null);
+
+    try {
+      const nextApps = await deleteJam(jamId);
+      if (Array.isArray(nextApps) && nextApps.length > 0) {
+        setApps(nextApps);
+      } else {
+        setApps((prev) => prev.filter((item) => item.id !== jamId));
+      }
+      setWishlist((prev) => prev.filter((item) => item.id !== jamId));
+      setSelectedApp((prev) => (prev?.id === jamId ? null : prev));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('marketplace:refresh'));
+        window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
+      }
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Failed to delete jam.');
+    }
+  };
 
   const handlePublishJam = async (newApp: VibeApp) => {
     if (isPublishing) {
@@ -359,6 +472,22 @@ const App: React.FC = () => {
 
     setIsPublishing(true);
     setLoadError(null);
+    const shouldAttemptMarketplacePublish =
+      newApp.publishSource === 'start-jam' && Boolean(newApp.publishToMarketplace);
+    const rankingsPublishApp: VibeApp = shouldAttemptMarketplacePublish
+      ? {
+          ...newApp,
+          isForSale: false,
+          askingPrice: undefined,
+          profitMargin: undefined,
+          isAnonymous: undefined,
+          boostTier: undefined,
+          marketplaceAssetId: undefined,
+          valuationMultipleX100: null,
+          marketplaceVerifiedStatus: 'unverified',
+          isOwnerListing: false,
+        }
+      : newApp;
 
     const upsertLocalApp = (incoming: VibeApp) => {
       setApps((prev) => {
@@ -372,10 +501,13 @@ const App: React.FC = () => {
       });
     };
 
-    let publishedApp = newApp;
+    let publishedApp: VibeApp = {
+      ...newApp,
+      ...rankingsPublishApp,
+    };
 
     try {
-      const publishedApps = await publishApp(newApp);
+      const publishedApps = await publishApp(rankingsPublishApp);
       if (publishedApps.length > 0) {
         setApps(publishedApps);
         const matched = publishedApps.find((item) => item.id === newApp.id || item.name === newApp.name);
@@ -383,11 +515,11 @@ const App: React.FC = () => {
           publishedApp = { ...newApp, ...matched };
         }
       } else {
-        upsertLocalApp(newApp);
+        upsertLocalApp(rankingsPublishApp);
       }
     } catch (error) {
       // Fallback to local state to avoid a dead-end UX when backend is unavailable.
-      upsertLocalApp(newApp);
+      upsertLocalApp(rankingsPublishApp);
       setLoadError(error instanceof Error ? error.message : 'Publish failed on backend; saved locally only.');
     }
 
@@ -893,6 +1025,8 @@ const App: React.FC = () => {
               setIsProfileOpen(false);
               setSelectedApp(app);
             }}
+            onDeleteJam={handleDeleteJam}
+            onListJamOnMarketplace={publishJamToMarketplace}
           />
         )}
       </AnimatePresence>

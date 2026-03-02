@@ -1,19 +1,22 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mail, ShieldCheck, FileText, LifeBuoy, ExternalLink, ArrowRight } from 'lucide-react';
+import { X, Mail, ShieldCheck, FileText, LifeBuoy, ExternalLink, ArrowRight, HelpCircle } from 'lucide-react';
 
 interface LegalModalProps {
-  initialTab: 'Terms' | 'Privacy' | 'Support';
+  initialTab: 'Terms' | 'Privacy' | 'FAQ' | 'Support';
   onClose: () => void;
 }
 
-const LegalModal: React.FC<LegalModalProps> = ({ initialTab, onClose }) => {
-  const [activeTab, setActiveTab] = React.useState(initialTab);
+type LegalTab = 'Terms' | 'Privacy' | 'FAQ' | 'Support';
 
-  const tabs = [
+const LegalModal: React.FC<LegalModalProps> = ({ initialTab, onClose }) => {
+  const [activeTab, setActiveTab] = React.useState<LegalTab>(initialTab);
+
+  const tabs: Array<{ id: LegalTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { id: 'Terms', label: 'Terms of Service', icon: FileText },
     { id: 'Privacy', label: 'Privacy Policy', icon: ShieldCheck },
+    { id: 'FAQ', label: 'FAQ', icon: HelpCircle },
     { id: 'Support', label: 'Support', icon: LifeBuoy },
   ];
 
@@ -39,7 +42,7 @@ const LegalModal: React.FC<LegalModalProps> = ({ initialTab, onClose }) => {
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
+                  onClick={() => setActiveTab(tab.id)}
                   className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2
                     ${activeTab === tab.id ? 'bg-white text-black' : 'text-zinc-500 hover:text-white'}`}
                 >
@@ -175,36 +178,224 @@ const LegalModal: React.FC<LegalModalProps> = ({ initialTab, onClose }) => {
               >
                 <div className="border-l-2 border-cyan-500 pl-6 py-2 mb-12">
                   <h1 className="text-3xl font-extrabold text-white tracking-tighter mb-2">Privacy Policy</h1>
-                  <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">Effective Date: October 2023</p>
+                  <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">Effective Date: March 2026</p>
                 </div>
 
                 <div className="space-y-6 text-zinc-400 text-sm leading-relaxed">
+                  <p>Welcome to VibeJam. We are committed to protecting your personal information and your right to privacy. This Privacy Policy explains how we collect, use, encrypt, and share your information when you use our marketplace, verification engine, and Deal Room.</p>
+
                   <section className="bg-white/[0.03] border border-white/10 p-8 rounded-3xl">
                     <h3 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
                       <ShieldCheck className="w-5 h-5 text-cyan-400" />
                       1. THE "ZERO-PII" CUSTOMER GUARANTEE
                     </h3>
-                    <p>VibeJam is built to verify business metrics, not individual people. We do NOT collect: Names, email addresses, phone numbers, or billing histories of your customers. Your customer list remains 100% private and invisible to VibeJam.</p>
+                    <p>VibeJam is an infrastructure built to verify aggregate business metrics, not to track individual people.</p>
+                    <ul className="list-disc pl-5 space-y-2 mt-4">
+                      <li>We DO NOT collect, fetch, or store the Personally Identifiable Information (PII) of your startup's customers.</li>
+                      <li>We DO NOT read your customers' names, email addresses, phone numbers, or individual billing histories.</li>
+                      <li>Your customer list remains 100% private, invisible to VibeJam, and stays securely within your payment processor (e.g., Stripe, Dodo Payments).</li>
+                    </ul>
                   </section>
 
                   <section>
                     <h3 className="text-white font-bold text-lg mb-4">2. INFORMATION WE COLLECT</h3>
-                    <p>We collect User Account Information, Verified Revenue Data (via Read-Only API keys), and Aggregate Verified Traffic Data (via Google Analytics).</p>
+                    <p>To operate the marketplace and verify assets, we collect the following categories of information from our Users (Founders and Buyers):</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>User Account Information: Your name, email address, Supabase authentication data, and optional social proof links (e.g., X/Twitter handles, LinkedIn URLs).</li>
+                      <li>Verified Financial Data: Aggregate revenue metrics (MRR, Net Revenue, Churn Rate) fetched securely via Read-Only API keys from your payment providers (Stripe, Dodo Payments, RevenueCat, LemonSqueezy, or Polar).</li>
+                      <li>Self-Reported Context Data: Operating expenses, profit margins, and tech stack details that you manually input.</li>
+                      <li>Verified Traffic Data: Aggregate monthly unique visitors fetched via web analytics APIs (e.g., Plausible Analytics, Google Analytics) or provided via proof URLs.</li>
+                      <li>Deal Room & Escrow Data: Messages sent between Buyers and Sellers, accepted offer amounts, and transaction metadata required to programmatically generate Escrow.com transactions.</li>
+                      <li>Platform Payment Data: If you purchase a "Premium Boost," payment details are processed securely by our Merchant of Record (Dodo Payments). VibeJam does not store your credit card numbers.</li>
+                    </ul>
                   </section>
 
                   <section>
-                    <h3 className="text-white font-bold text-lg mb-4">4. DATA SECURITY & ENCRYPTION</h3>
-                    <p>We treat your API keys as "Class-1" sensitive data. All keys are stored using AES-256 industrial-grade encryption. No human staff member at VibeJam can view your full API keys in plain text.</p>
+                    <h3 className="text-white font-bold text-lg mb-4">3. HOW WE USE YOUR INFORMATION</h3>
+                    <p>We use the data we collect strictly to operate and improve the VibeJam marketplace:</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>To auto-generate verified financial dashboards for your public marketplace listing.</li>
+                      <li>To dynamically generate social media sharing images (Open Graph/Twitter cards) featuring your public metrics.</li>
+                      <li>To route transactional notifications (e.g., Deal Alerts, New Offers) via our email provider (Resend).</li>
+                      <li>To calculate platform-wide benchmarks and enforce our Terms of Service.</li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">4. DATA SHARING & PROGRESSIVE DISCLOSURE</h3>
+                    <p>VibeJam acts as a secure proxy between Buyers and Sellers. We do not sell your personal data to data brokers or marketing agencies.</p>
+                    <p className="text-white font-semibold mt-4">The Deal Room Proxy Wall:</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>Pre-Offer: Your personal email address and identity remain hidden from Buyers browsing the marketplace.</li>
+                      <li>Post-Offer: We utilize "Progressive Disclosure." Only when a Seller officially clicks "Accept Offer" do we reveal the Buyer and Seller email addresses to each other to facilitate the signing of Legal Agreements (LOI and APA).</li>
+                    </ul>
+                    <p className="text-white font-semibold mt-4">Third-Party Service Providers:</p>
+                    <p>We share necessary data payloads with trusted infrastructure partners to operate the platform:</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>Escrow.com: To facilitate secure wire transfers, we share the Buyer and Seller email addresses and the agreed purchase price via their Broker API.</li>
+                      <li>Vercel & Supabase: For secure cloud hosting and relational database management.</li>
+                      <li>Resend: For delivering transactional emails.</li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">5. DATA SECURITY & ENCRYPTION</h3>
+                    <p>We treat your API keys as "Class-1" sensitive data.</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>AES-256-GCM Encryption: All third-party API keys provided to VibeJam are encrypted at rest using industrial-grade cryptography. No human staff member at VibeJam can view your full API keys in plain text.</li>
+                      <li>Strictly Read-Only: VibeJam's backend enforces a "Zero-Write" policy. We programmatically reject administrative or "Secret" keys (e.g., sk_live_) for platforms like Stripe, exclusively accepting restricted, read-only keys (rk_live_).</li>
+                    </ul>
                   </section>
 
                   <section>
                     <h3 className="text-white font-bold text-lg mb-4">6. DATA RETENTION & DELETION</h3>
-                    <p>You are the owner of your data. You can disconnect your accounts at any time, and we immediately purge your API keys from our database.</p>
+                    <p>You are the owner of your data.</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>The Right to Disconnect: You can disconnect your payment or analytics accounts from your VibeJam dashboard at any time. When you disconnect, our system automatically and immediately purges your encrypted API keys from our database.</li>
+                      <li>Account Deletion: If you wish to permanently delete your VibeJam account and all associated marketplace listings, you may do so via your account settings or by contacting our support team.</li>
+                    </ul>
                   </section>
 
                   <section>
-                    <h3 className="text-white font-bold text-lg mb-4">11. CONTACT US</h3>
-                    <p>Questions about this policy? Contact our Data Protection team at: <span className="text-white font-bold">vibejamco@gmail.com</span>.</p>
+                    <h3 className="text-white font-bold text-lg mb-4">7. INTERNATIONAL DATA TRANSFERS</h3>
+                    <p>VibeJam operates globally. Your information may be transferred to, stored, and processed in secure cloud infrastructure located outside of your home country (including the United States or the European Union). By using VibeJam, you consent to the transfer of information to countries outside your country of residence, which may have different data protection rules. As noted in our Terms of Service, VibeJam operates under the governing law of the United Arab Emirates (UAE).</p>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">8. YOUR PRIVACY RIGHTS</h3>
+                    <p>Depending on your global location (including under GDPR or CCPA), you may have the right to:</p>
+                    <ul className="list-disc pl-5 space-y-2">
+                      <li>Request access to the personal data we hold about you.</li>
+                      <li>Request corrections to inaccurate data.</li>
+                      <li>Request the erasure of your personal data.</li>
+                      <li>Opt-out of non-transactional marketing communications (e.g., Deal Alerts).</li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">9. CHANGES TO THIS POLICY</h3>
+                    <p>We may update this Privacy Policy periodically to reflect changes in our infrastructure, integrations, or legal requirements. We will notify you of any material changes by updating the "Effective Date" at the top of this policy and, where appropriate, sending an email notification.</p>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">10. CONTACT US</h3>
+                    <p>Questions about this policy, your data, or our AES encryption standards? Contact our Data Protection team at: <span className="text-white font-bold">vibejamco@gmail.com</span>.</p>
+                  </section>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'FAQ' && (
+              <motion.div
+                key="faq"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="prose prose-invert max-w-none space-y-8"
+              >
+                <div className="border-l-2 border-emerald-400 pl-6 py-2 mb-12">
+                  <h1 className="text-3xl font-extrabold text-white tracking-tighter mb-2">VibeJam FAQ</h1>
+                  <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">Everything You Need to Know</p>
+                </div>
+
+                <div className="space-y-8 text-zinc-400 text-sm leading-relaxed">
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">General & Platform</h3>
+
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-white font-semibold">What is VibeJam?</p>
+                        <p>VibeJam is a premium marketplace and financial verification engine for buying and selling profitable micro-startups, SaaS products, and mobile apps. We connect directly to payment processors (like Stripe and Dodo Payments) to verify real revenue, completely eliminating the risk of fake MRR screenshots.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">How is VibeJam different from other marketplaces?</p>
+                        <p>Most marketplaces stop at verifying gross revenue, which can be misleading. VibeJam is built for serious buyers and sellers by verifying net profit, churn rate, and web traffic. We also provide an integrated Deal Room with LOI and APA templates plus native Escrow.com API workflows to handle secure handover.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">What payment processors do you support for verification?</p>
+                        <p>We support Stripe, Dodo Payments, LemonSqueezy, Polar, and RevenueCat. Whether you run a US-based SaaS or a global app, you can verify revenue on VibeJam.</p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">Security & Data Privacy</h3>
+
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-white font-semibold">Is it safe to connect my Stripe or payment API key?</p>
+                        <p>Yes. VibeJam enforces a strict zero-write architecture. For Stripe, we reject standard secret keys (`sk_live_`) and only accept restricted read-only keys (`rk_live_`). VibeJam cannot initiate charges, issue refunds, or alter your business. API keys are encrypted at rest with AES-256-GCM.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">Do you collect or see my customers&apos; personal data?</p>
+                        <p>No. We follow a Zero-PII guarantee. We only fetch aggregate metrics (such as MRR and churn) and do not fetch or store customer names, emails, or individual billing histories.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">Will my email address be spammed by buyers?</p>
+                        <p>No. VibeJam uses progressive disclosure. Your direct contact info stays hidden during discovery and is only revealed after you explicitly accept a formal offer.</p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">For Sellers</h3>
+
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-white font-semibold">How much does it cost to sell my startup on VibeJam?</p>
+                        <p>Listing is free. VibeJam charges a flat 3% success commission only if your startup is acquired. Optional paid boosts may be available for extra visibility.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">How do you calculate profit margin?</p>
+                        <p>We fetch verified gross MRR from your connected provider and combine it with your declared trailing 30-day operating expenses. VibeJam computes and displays net profit margin as a listing signal.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">What happens if I reject an offer?</p>
+                        <p>You keep full control. You can reject, counter, or continue negotiating through the in-platform inbox, and your listing remains active for other buyers.</p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">For Buyers</h3>
+
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-white font-semibold">How do I know the financial numbers are real?</p>
+                        <p>Core metrics are pulled directly from payment processors via API, rather than uploaded screenshots or spreadsheets.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">How do I make an offer?</p>
+                        <p>Open a listing, click Make Offer, submit amount and message, and the seller is notified instantly. Once accepted, both parties move into a private Deal Room.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">Can I set up alerts for specific startup criteria?</p>
+                        <p>Yes. Create alerts from Marketplace filters (MRR, price, margin, churn, traffic). You will receive email notifications for matching new listings.</p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="text-white font-bold text-lg mb-4">Deal Room & Escrow</h3>
+
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-white font-semibold">What happens after an offer is accepted?</p>
+                        <p>The workflow is guided in stages: LOI, due diligence, APA, escrow funding, and asset transfer/close. Each stage is progressively unlocked in the Deal Room.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">How are funds secured? Do I pay the seller directly?</p>
+                        <p>Do not wire funds directly. VibeJam integrates with Escrow.com so funds are secured in escrow and released only after transfer conditions are met.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">Who pays escrow fees?</p>
+                        <p>Standard Escrow.com fees are typically split 50/50 between buyer and seller. This is separate from VibeJam&apos;s success commission.</p>
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">Do I need a lawyer to draft contracts?</p>
+                        <p>VibeJam provides LOI and APA templates in the Deal Room to reduce setup friction, but both parties should consult independent legal counsel for final agreement review.</p>
+                      </div>
+                    </div>
                   </section>
                 </div>
               </motion.div>

@@ -12,6 +12,7 @@ import {
 } from '../lib/server/marketplace-validation.js';
 import {
   ACQUIRE_STAGE_ORDER,
+  type AcquireStage,
   ensureConversation,
   formatAcquireStageLabel,
   upsertPipelineStage,
@@ -55,6 +56,7 @@ const LISTING_SELECT = [
 ].join(',');
 
 const PREVIEW_MAX = 120;
+const ACQUIRE_VISIBLE_STAGE_ORDER = ACQUIRE_STAGE_ORDER.filter((stage) => stage !== 'WATCHLISTED');
 
 const parseBooleanFlag = (value: unknown): boolean => {
   if (typeof value === 'boolean') {
@@ -575,47 +577,116 @@ const resolveConversationIdFromLegacyOffer = async (
   }
 };
 
-const syncWishlistIntoPipeline = async (supabase: any, buyerId: string) => {
-  const { data: wishlistItems, error } = await supabase
-    .from('wishlist_items')
-    .select('listing_id')
-    .eq('user_id', buyerId);
+const syncOfferSentIntoPipeline = async (supabase: any, buyerId: string) => {
+  const collected = new Map<string, { listingId: string; note: string | null; at: string }>();
 
-  if (error) {
-    if (isRecoverableSchemaError(error)) {
-      return;
+  const mergeRows = (
+    rows: any[] | null | undefined,
+    getListingId: (row: any) => string | null,
+    getNote: (row: any) => string | null,
+    getAt: (row: any) => string | null,
+  ) => {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const listingId = getListingId(row);
+      if (!listingId) {
+        continue;
+      }
+      const candidateAt = getAt(row) ?? new Date().toISOString();
+      const existing = collected.get(listingId);
+      if (!existing || new Date(candidateAt).getTime() >= new Date(existing.at).getTime()) {
+        collected.set(listingId, {
+          listingId,
+          note: getNote(row),
+          at: candidateAt,
+        });
+      }
     }
-    throw error;
+  };
+
+  const { data: marketplaceOffers, error: marketplaceOffersError } = await supabase
+    .from('marketplace_offers')
+    .select('asset_id, offer_message, updated_at, created_at')
+    .eq('buyer_user_id', buyerId)
+    .order('created_at', { ascending: false });
+
+  if (marketplaceOffersError && !isRecoverableSchemaError(marketplaceOffersError)) {
+    throw marketplaceOffersError;
   }
 
-  const listingIds = Array.from(
-    new Set(
-      (Array.isArray(wishlistItems) ? wishlistItems : [])
-        .map((item: any) => item.listing_id)
-        .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0),
-    ),
+  mergeRows(
+    marketplaceOffers,
+    (row) => (typeof row?.asset_id === 'string' ? row.asset_id : null),
+    (row) => (typeof row?.offer_message === 'string' ? row.offer_message : null),
+    (row) => (typeof row?.updated_at === 'string' ? row.updated_at : (typeof row?.created_at === 'string' ? row.created_at : null)),
   );
 
-  if (listingIds.length === 0) {
+  const { data: legacyOffers, error: legacyOffersError } = await supabase
+    .from('offers')
+    .select('asset_id, message, updated_at, created_at')
+    .eq('buyer_user_id', buyerId)
+    .order('created_at', { ascending: false });
+
+  if (legacyOffersError && !isRecoverableSchemaError(legacyOffersError)) {
+    throw legacyOffersError;
+  }
+
+  mergeRows(
+    legacyOffers,
+    (row) => (typeof row?.asset_id === 'string' ? row.asset_id : null),
+    (row) => (typeof row?.message === 'string' ? row.message : null),
+    (row) => (typeof row?.updated_at === 'string' ? row.updated_at : (typeof row?.created_at === 'string' ? row.created_at : null)),
+  );
+
+  const offerRows = Array.from(collected.values());
+  if (offerRows.length === 0) {
     return;
   }
 
-  const rows = listingIds.map((listingId) => ({
-    buyer_id: buyerId,
-    listing_id: listingId,
-    stage: 'WATCHLISTED',
-    last_activity_at: new Date().toISOString(),
-  }));
-
-  const { error: insertError } = await supabase
+  const listingIds = offerRows.map((row) => row.listingId);
+  const { data: existingPipelineRows, error: existingPipelineRowsError } = await supabase
     .from('acquisition_pipeline_items')
-    .insert(rows, {
-      onConflict: 'buyer_id,listing_id',
-      ignoreDuplicates: true,
-    } as any);
+    .select('listing_id, stage')
+    .eq('buyer_id', buyerId)
+    .in('listing_id', listingIds);
 
-  if (insertError && !isRecoverableSchemaError(insertError)) {
-    throw insertError;
+  if (existingPipelineRowsError) {
+    if (isRecoverableSchemaError(existingPipelineRowsError)) {
+      return;
+    }
+    throw existingPipelineRowsError;
+  }
+
+  const existingByListingId = new Map<string, any>(
+    (Array.isArray(existingPipelineRows) ? existingPipelineRows : [])
+      .map((row: any) => [String(row.listing_id), row]),
+  );
+
+  const upsertRows = offerRows
+    .filter((row) => {
+      const existing = existingByListingId.get(row.listingId);
+      if (!existing) {
+        return true;
+      }
+      return existing.stage === 'WATCHLISTED';
+    })
+    .map((row) => ({
+      buyer_id: buyerId,
+      listing_id: row.listingId,
+      stage: 'OFFER_SENT',
+      notes: row.note,
+      last_activity_at: row.at,
+    }));
+
+  if (upsertRows.length === 0) {
+    return;
+  }
+
+  const { error: upsertError } = await supabase
+    .from('acquisition_pipeline_items')
+    .upsert(upsertRows, { onConflict: 'buyer_id,listing_id' });
+
+  if (upsertError && !isRecoverableSchemaError(upsertError)) {
+    throw upsertError;
   }
 };
 
@@ -630,7 +701,11 @@ const buildPipelineResponse = async (supabase: any, buyerId: string) => {
     if (isRecoverableSchemaError(error)) {
       return {
         items: [],
-        stages: ACQUIRE_STAGE_ORDER.map((stage) => ({ stage, label: formatAcquireStageLabel(stage), count: 0 })),
+        stages: ACQUIRE_VISIBLE_STAGE_ORDER.map((stage) => ({
+          stage,
+          label: formatAcquireStageLabel(stage),
+          count: 0,
+        })),
       };
     }
     throw error;
@@ -640,7 +715,11 @@ const buildPipelineResponse = async (supabase: any, buyerId: string) => {
   if (pipelineRows.length === 0) {
     return {
       items: [],
-      stages: ACQUIRE_STAGE_ORDER.map((stage) => ({ stage, label: formatAcquireStageLabel(stage), count: 0 })),
+      stages: ACQUIRE_VISIBLE_STAGE_ORDER.map((stage) => ({
+        stage,
+        label: formatAcquireStageLabel(stage),
+        count: 0,
+      })),
     };
   }
 
@@ -672,12 +751,16 @@ const buildPipelineResponse = async (supabase: any, buyerId: string) => {
   );
 
   const stageCounts = new Map<string, number>();
-  for (const stage of ACQUIRE_STAGE_ORDER) {
+  for (const stage of ACQUIRE_VISIBLE_STAGE_ORDER) {
     stageCounts.set(stage, 0);
   }
 
   const items = pipelineRows
     .map((row: any) => {
+      if (row.stage === 'WATCHLISTED') {
+        return null;
+      }
+
       const listing = listingMap.get(row.listing_id);
       if (!listing) {
         return null;
@@ -715,7 +798,7 @@ const buildPipelineResponse = async (supabase: any, buyerId: string) => {
 
   return {
     items,
-    stages: ACQUIRE_STAGE_ORDER.map((stage) => ({
+    stages: ACQUIRE_VISIBLE_STAGE_ORDER.map((stage) => ({
       stage,
       label: formatAcquireStageLabel(stage),
       count: stageCounts.get(stage) ?? 0,
@@ -1496,7 +1579,7 @@ const handleAcquirePipeline = async (req: any, res: any, user: any, supabase: an
   const method = getMethod(req);
 
   if (method === 'GET') {
-    await syncWishlistIntoPipeline(supabase, user.id);
+    await syncOfferSentIntoPipeline(supabase, user.id);
     const payload = await buildPipelineResponse(supabase, user.id);
     return sendJson(res, 200, { data: payload });
   }
@@ -1568,6 +1651,37 @@ const handleAcquireStage = async (req: any, res: any, user: any, supabase: any) 
   }
 
   const payload = parsed.data;
+
+  const { data: existingPipelineItem, error: existingPipelineItemError } = await supabase
+    .from('acquisition_pipeline_items')
+    .select('stage')
+    .eq('buyer_id', user.id)
+    .eq('listing_id', payload.listingId)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingPipelineItemError && !isRecoverableSchemaError(existingPipelineItemError)) {
+    throw existingPipelineItemError;
+  }
+
+  const currentStage = (typeof existingPipelineItem?.stage === 'string'
+    ? existingPipelineItem.stage
+    : null) as AcquireStage | null;
+  if (!currentStage && payload.stage !== 'OFFER_SENT') {
+    return sendJson(res, 400, {
+      error: 'Stage sequence invalid. Start with OFFER_SENT.',
+    });
+  }
+  if (currentStage) {
+    const currentIndex = ACQUIRE_STAGE_ORDER.indexOf(currentStage);
+    const nextAllowedStage = currentIndex >= 0 ? ACQUIRE_STAGE_ORDER[currentIndex + 1] : null;
+    const isNoOp = currentStage === payload.stage;
+    if (!isNoOp && payload.stage !== nextAllowedStage) {
+      return sendJson(res, 400, {
+        error: `Stage sequence invalid. ${currentStage} can only move to ${nextAllowedStage ?? 'no further stage'}.`,
+      });
+    }
+  }
 
   const { data: listing, error: listingError } = await supabase
     .from('marketplace_assets')

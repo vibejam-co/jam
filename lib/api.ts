@@ -91,6 +91,11 @@ export const publishApp = (app: VibeApp) =>
     body: JSON.stringify({ app }),
   });
 
+export const deleteJam = (id: string) =>
+  request<VibeApp[]>(`/api/apps?id=${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+
 export const fetchNotifications = () => request<Notification[]>('/api/notifications');
 
 export const subscribeToNewsletter = (email: string) =>

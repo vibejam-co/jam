@@ -2,7 +2,7 @@
 import React from 'react';
 
 interface FooterProps {
-  onOpenLegal: (tab: 'Terms' | 'Privacy' | 'Support') => void;
+  onOpenLegal: (tab: 'Terms' | 'Privacy' | 'FAQ' | 'Support') => void;
 }
 
 const Footer: React.FC<FooterProps> = ({ onOpenLegal }) => {
@@ -26,6 +26,12 @@ const Footer: React.FC<FooterProps> = ({ onOpenLegal }) => {
             className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 hover:text-white transition-colors"
           >
             Privacy Policy
+          </button>
+          <button
+            onClick={() => onOpenLegal('FAQ')}
+            className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 hover:text-white transition-colors"
+          >
+            FAQ
           </button>
           <button 
             onClick={() => onOpenLegal('Support')}
