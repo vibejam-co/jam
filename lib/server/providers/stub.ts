@@ -17,7 +17,7 @@ const validateFormat = (provider: ProviderName, key: string) => {
 export const buildStubAdapter = (provider: ProviderName): ProviderAdapter => ({
   provider,
 
-  async validateKey(key: string) {
+  async validateKey(key: string, _options) {
     validateFormat(provider, key);
     return {
       readOnlyLikely: false,

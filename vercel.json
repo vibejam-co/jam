@@ -14,6 +14,7 @@
     { "src": "/api/marketplace/assets/([^/]+)/publish", "dest": "/api/marketplace/assets-publish?assetId=$1" },
     { "src": "/api/marketplace/assets/([^/]+)/financials", "dest": "/api/marketplace/assets-financials?assetId=$1" },
     { "src": "/api/marketplace/assets/([^/]+)/traffic", "dest": "/api/marketplace/assets-financials?assetId=$1&section=traffic" },
+    { "src": "/api/marketplace/assets/([^/]+)/generate-deck", "dest": "/api/marketplace/assets-generate-deck?assetId=$1" },
     { "src": "/api/marketplace/deals/([^/]+)/escrow", "dest": "/api/marketplace/offers?scope=deal-room-escrow&offerId=$1" },
     { "src": "/api/marketplace/deals/([^/]+)", "dest": "/api/marketplace/offers?scope=deal-room&offerId=$1" },
     { "src": "/api/marketplace/assets/([^/]+)", "dest": "/api/marketplace/assets?assetId=$1" },

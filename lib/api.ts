@@ -25,6 +25,7 @@ import type {
   MarketplaceAssetFinancialsResponse,
   MarketplaceAssetTrafficInput,
   MarketplaceAssetTrafficResponse,
+  MarketplaceGenerateDeckResponse,
   MarketplaceOfferInput,
   MarketplacePublishPaymentRequiredResponse,
   MarketplacePublishSuccessResponse,
@@ -65,12 +66,13 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const contentType = response.headers.get('content-type') ?? '';
   const isJson = contentType.includes('application/json');
   const rawBody = await response.text();
-  const payload = (isJson && rawBody ? (JSON.parse(rawBody) as ApiResponse<T>) : null);
+  const payload = (isJson && rawBody ? (JSON.parse(rawBody) as unknown) : null);
 
   if (!response.ok) {
+    const maybeEnvelope = payload as Partial<ApiResponse<T>> | null;
     const message =
-      payload?.details ||
-      payload?.error ||
+      maybeEnvelope?.details ||
+      maybeEnvelope?.error ||
       (rawBody ? rawBody.slice(0, 160) : '') ||
       `Request failed: ${response.status}`;
     throw new Error(message);
@@ -80,7 +82,31 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
     throw new Error(`Expected JSON response from ${path}, received ${contentType || 'unknown content-type'}.`);
   }
 
-  return payload.data;
+  if (typeof payload === 'object' && payload !== null && Object.prototype.hasOwnProperty.call(payload, 'data')) {
+    return (payload as ApiResponse<T>).data;
+  }
+
+  return payload as T;
+};
+
+const normalizeMarketplaceDeckResponse = (
+  assetId: string,
+  payload: MarketplaceGenerateDeckResponse | { deck?: unknown; reused?: unknown; assetId?: unknown } | null | undefined,
+): MarketplaceGenerateDeckResponse => {
+  if (payload && typeof payload === 'object' && 'pitchDecks' in payload) {
+    return payload as MarketplaceGenerateDeckResponse;
+  }
+
+  const legacyDeck = payload && typeof payload === 'object' ? (payload as any).deck : null;
+  if (legacyDeck && typeof legacyDeck === 'object') {
+    return {
+      assetId: String((payload as any)?.assetId ?? assetId),
+      reused: Boolean((payload as any)?.reused),
+      pitchDecks: legacyDeck as MarketplaceGenerateDeckResponse['pitchDecks'],
+    };
+  }
+
+  throw new Error('Deck payload unavailable.');
 };
 
 export const fetchApps = () => request<VibeApp[]>('/api/apps');
@@ -197,6 +223,25 @@ export const fetchMarketplaceAssetTraffic = (assetId: string) =>
   request<MarketplaceAssetTrafficResponse>(
     `/api/marketplace/assets/${encodeURIComponent(assetId)}/traffic`,
   );
+
+export const generateMarketplaceAssetDeck = (
+  assetId: string,
+  options?: { forceRegenerate?: boolean },
+) =>
+  request<MarketplaceGenerateDeckResponse | { deck?: unknown; reused?: unknown; assetId?: unknown }>(
+    `/api/marketplace/assets/${encodeURIComponent(assetId)}/generate-deck`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        forceRegenerate: Boolean(options?.forceRegenerate),
+      }),
+    },
+  ).then((payload) => normalizeMarketplaceDeckResponse(assetId, payload));
+
+export const fetchMarketplaceAssetDeck = (assetId: string) =>
+  request<MarketplaceGenerateDeckResponse | { deck?: unknown; reused?: unknown; assetId?: unknown }>(
+    `/api/marketplace/assets/${encodeURIComponent(assetId)}/generate-deck`,
+  ).then((payload) => normalizeMarketplaceDeckResponse(assetId, payload));
 
 export const deleteMarketplaceAsset = (idOrSlug: string) =>
   request<{ deleted: boolean; assetId: string }>(

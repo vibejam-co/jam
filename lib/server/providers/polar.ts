@@ -116,6 +116,37 @@ const extractItems = (payload: any): unknown[] => {
   return [];
 };
 
+const extractPolarOrganizationId = (payload: any): string | null => {
+  const rows = extractItems(payload);
+  if (rows.length === 0) {
+    return null;
+  }
+  const first = rows[0];
+  if (!first || typeof first !== 'object') {
+    return null;
+  }
+  const record = first as Record<string, unknown>;
+  const directCandidates = [record.id, record.organization_id, record.organizationId, record.slug];
+  for (const candidate of directCandidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  const attributes =
+    record.attributes && typeof record.attributes === 'object'
+      ? (record.attributes as Record<string, unknown>)
+      : null;
+  if (attributes) {
+    const nestedCandidates = [attributes.id, attributes.organization_id, attributes.organizationId, attributes.slug];
+    for (const candidate of nestedCandidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+  return null;
+};
+
 const normalizeOrder = (raw: unknown): NormalizedTransaction | null => {
   if (!raw || typeof raw !== 'object') {
     return null;
@@ -206,10 +237,22 @@ const computeGrowthBps = (transactions: NormalizedTransaction[]): number => {
 export const polarAdapter: ProviderAdapter = {
   provider: 'polar',
 
-  async validateKey(key: string) {
+  async validateKey(key: string, _options) {
     const trimmed = key.trim();
     if (!trimmed || trimmed.length < 12) {
       throw new Error('Polar key format is invalid.');
+    }
+
+    const organizationPing = await polarRequest(trimmed, '/api/v1/organizations', { limit: 1 });
+    if (organizationPing.status === 401 || organizationPing.status === 403) {
+      throw new Error('Invalid key or insufficient permissions.');
+    }
+    if (organizationPing.status < 200 || organizationPing.status >= 300) {
+      throw new Error(`Polar organization lookup failed (${organizationPing.status}).`);
+    }
+    const organizationId = extractPolarOrganizationId(organizationPing.payload);
+    if (!organizationId) {
+      throw new Error('Unable to resolve Polar organization id from this key.');
     }
 
     const ping = await polarRequest(trimmed, '/v1/orders', { limit: 1 });
@@ -222,6 +265,7 @@ export const polarAdapter: ProviderAdapter = {
 
     return {
       readOnlyLikely: false,
+      providerAccountId: organizationId,
       warning:
         'Use least-privilege read scopes in Polar (subscriptions/orders metrics only).',
     };
@@ -310,4 +354,3 @@ export const polarAdapter: ProviderAdapter = {
     };
   },
 };
-

@@ -44,6 +44,11 @@ const MARKETPLACE_LISTING_SELECT = [
   'founder_email',
   'logo_url',
   'asking_price_cents',
+  'mrr_cents',
+  'profit_margin_bps',
+  'trailing_30d_profit_cents',
+  'monthly_unique_visitors',
+  'pitch_decks',
   'verified_status',
   'is_listed',
   'listing_status',
@@ -171,6 +176,39 @@ const loadApps = async (supabase: any) => {
     return baseApps;
   }
 
+  const listingIds = listings
+    .map((row: any) => String(row?.id ?? '').trim())
+    .filter(Boolean);
+  const churnByAssetId = new Map<string, number | null>();
+
+  if (listingIds.length > 0) {
+    const { data: snapshotRows, error: snapshotError } = await supabase
+      .from('revenue_snapshots')
+      .select('asset_id,churn_bps,period_end')
+      .in('asset_id', listingIds)
+      .order('period_end', { ascending: false })
+      .limit(Math.max(1000, listingIds.length * 3));
+
+    if (snapshotError) {
+      if (!isRecoverableSchemaError(snapshotError)) {
+        throw snapshotError;
+      }
+    } else {
+      for (const row of Array.isArray(snapshotRows) ? snapshotRows : []) {
+        const assetId = String((row as any)?.asset_id ?? '').trim();
+        if (!assetId || churnByAssetId.has(assetId)) {
+          continue;
+        }
+        const churnRaw = (row as any)?.churn_bps;
+        const churnValue =
+          typeof churnRaw === 'number' && Number.isFinite(churnRaw)
+            ? Math.max(0, Math.round(churnRaw))
+            : null;
+        churnByAssetId.set(assetId, churnValue);
+      }
+    }
+  }
+
   const byJamId = new Map<string, any>();
   const byNameFounder = new Map<string, any>();
   const byName = new Map<string, any>();
@@ -214,6 +252,25 @@ const loadApps = async (supabase: any) => {
     );
   };
 
+  const extractPitchDeckCoverImage = (value: unknown): string | null => {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    const slides = (value as { slides?: unknown }).slides;
+    if (!Array.isArray(slides)) {
+      return null;
+    }
+    for (const slide of slides) {
+      const imageUrl = slide && typeof slide === 'object'
+        ? String((slide as { imageUrl?: unknown }).imageUrl ?? '').trim()
+        : '';
+      if (imageUrl && isImageIconSource(imageUrl)) {
+        return imageUrl;
+      }
+    }
+    return null;
+  };
+
   return baseApps.map((app) => {
     const appName = String(app.name ?? '').trim().toLowerCase();
     const founderEmail = String(app.founder?.email ?? '').trim().toLowerCase();
@@ -234,7 +291,27 @@ const loadApps = async (supabase: any) => {
     }
 
     const listingLogo = String((matchedListing as any)?.logo_url ?? '').trim();
+    const matchedAssetId = String((matchedListing as any)?.id ?? '').trim();
     const resolvedIcon = isImageIconSource(listingLogo) ? listingLogo : app.icon;
+    const listingProfitMarginBpsRaw = (matchedListing as any)?.profit_margin_bps;
+    const listingProfitMarginBps =
+      typeof listingProfitMarginBpsRaw === 'number' && Number.isFinite(listingProfitMarginBpsRaw)
+        ? Math.max(0, Math.round(listingProfitMarginBpsRaw))
+        : null;
+    const trailingProfitRaw = (matchedListing as any)?.trailing_30d_profit_cents;
+    const trailingProfitCents =
+      typeof trailingProfitRaw === 'number' && Number.isFinite(trailingProfitRaw)
+        ? Math.round(trailingProfitRaw)
+        : null;
+    const visitorsRaw = (matchedListing as any)?.monthly_unique_visitors;
+    const monthlyUniqueVisitors =
+      typeof visitorsRaw === 'number' && Number.isFinite(visitorsRaw)
+        ? Math.max(0, Math.round(visitorsRaw))
+        : null;
+    const churnBps = matchedAssetId && churnByAssetId.has(matchedAssetId)
+      ? churnByAssetId.get(matchedAssetId) ?? null
+      : null;
+    const pitchDeckCoverImageUrl = extractPitchDeckCoverImage((matchedListing as any)?.pitch_decks);
 
     return {
       ...app,
@@ -250,9 +327,22 @@ const loadApps = async (supabase: any) => {
         typeof (matchedListing as any)?.asking_price_cents === 'number' && (matchedListing as any).asking_price_cents > 0
           ? formatAskingPrice((matchedListing as any).asking_price_cents)
           : app.askingPrice,
-      marketplaceAssetId: String((matchedListing as any).id),
+      marketplaceAssetId: matchedAssetId,
       marketplaceVerifiedStatus:
         ((matchedListing as any)?.verified_status as any) ?? app.marketplaceVerifiedStatus,
+      monthlyRevenue:
+        typeof (matchedListing as any)?.mrr_cents === 'number' && (matchedListing as any).mrr_cents > 0
+          ? Math.round((matchedListing as any).mrr_cents / 100)
+          : app.monthlyRevenue,
+      netProfitCents: trailingProfitCents ?? app.netProfitCents ?? null,
+      profitMarginBps:
+        listingProfitMarginBps
+        ?? (typeof app.profitMargin === 'number' && Number.isFinite(app.profitMargin)
+          ? Math.round(app.profitMargin * 100)
+          : app.profitMarginBps ?? null),
+      monthlyUniqueVisitors: monthlyUniqueVisitors ?? app.monthlyUniqueVisitors ?? null,
+      churnBps: churnBps ?? app.churnBps ?? null,
+      pitchDeckCoverImageUrl: pitchDeckCoverImageUrl ?? app.pitchDeckCoverImageUrl ?? null,
     };
   });
 };

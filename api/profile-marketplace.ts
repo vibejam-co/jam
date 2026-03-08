@@ -725,7 +725,12 @@ const buildPipelineResponse = async (supabase: any, buyerId: string) => {
 
   const listingIds = Array.from(new Set(pipelineRows.map((row: any) => row.listing_id).filter(Boolean)));
 
-  const [{ data: listings, error: listingsError }, { data: conversations, error: conversationsError }] =
+  const [
+    { data: listings, error: listingsError },
+    { data: conversations, error: conversationsError },
+    { data: domainOffers, error: domainOffersError },
+    { data: legacyOffers, error: legacyOffersError },
+  ] =
     await Promise.all([
       supabase.from('marketplace_assets').select(LISTING_SELECT).in('id', listingIds),
       supabase
@@ -733,6 +738,16 @@ const buildPipelineResponse = async (supabase: any, buyerId: string) => {
         .select('id, listing_id, buyer_id, seller_id')
         .eq('buyer_id', buyerId)
         .in('listing_id', listingIds),
+      supabase
+        .from('marketplace_offers')
+        .select('id, asset_id, updated_at, created_at')
+        .eq('buyer_user_id', buyerId)
+        .in('asset_id', listingIds),
+      supabase
+        .from('offers')
+        .select('id, asset_id, updated_at, created_at')
+        .eq('buyer_user_id', buyerId)
+        .in('asset_id', listingIds),
     ]);
 
   if (listingsError) {
@@ -742,6 +757,12 @@ const buildPipelineResponse = async (supabase: any, buyerId: string) => {
   if (conversationsError && !isRecoverableSchemaError(conversationsError)) {
     throw conversationsError;
   }
+  if (domainOffersError && !isRecoverableSchemaError(domainOffersError)) {
+    throw domainOffersError;
+  }
+  if (legacyOffersError && !isRecoverableSchemaError(legacyOffersError)) {
+    throw legacyOffersError;
+  }
 
   const listingMap = new Map<string, any>(
     (Array.isArray(listings) ? listings : []).map((listing: any) => [listing.id, listing]),
@@ -749,6 +770,36 @@ const buildPipelineResponse = async (supabase: any, buyerId: string) => {
   const conversationMap = new Map<string, any>(
     (Array.isArray(conversations) ? conversations : []).map((row: any) => [row.listing_id, row]),
   );
+  const dealOfferByListingId = new Map<string, { id: string; at: number; source: 'domain' | 'legacy' }>();
+
+  const pushOfferRows = (rows: any[] | null | undefined, source: 'domain' | 'legacy') => {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const listingId = typeof row?.asset_id === 'string' ? row.asset_id : null;
+      const offerId = typeof row?.id === 'string' ? row.id : null;
+      if (!listingId || !offerId) {
+        continue;
+      }
+
+      const atIso =
+        typeof row?.updated_at === 'string'
+          ? row.updated_at
+          : (typeof row?.created_at === 'string' ? row.created_at : null);
+      const parsedAt = atIso ? Date.parse(atIso) : Number.NaN;
+      const at = Number.isFinite(parsedAt) ? parsedAt : 0;
+      const existing = dealOfferByListingId.get(listingId);
+
+      if (
+        !existing
+        || at > existing.at
+        || (at === existing.at && source === 'domain' && existing.source === 'legacy')
+      ) {
+        dealOfferByListingId.set(listingId, { id: offerId, at, source });
+      }
+    }
+  };
+
+  pushOfferRows(domainOffers, 'domain');
+  pushOfferRows(legacyOffers, 'legacy');
 
   const stageCounts = new Map<string, number>();
   for (const stage of ACQUIRE_VISIBLE_STAGE_ORDER) {
@@ -779,6 +830,7 @@ const buildPipelineResponse = async (supabase: any, buyerId: string) => {
         updatedAt: row.updated_at,
         lastActivityAt: row.last_activity_at,
         conversationId: conversation?.id ?? null,
+        dealOfferId: dealOfferByListingId.get(String(row.listing_id))?.id ?? null,
         listing: {
           id: listing.id,
           slug: listing.slug,
@@ -864,6 +916,23 @@ const handleProfileSummary = async (req: any, res: any, user: any, supabase: any
     .filter((row: any) => row.is_listed === true)
     .reduce((sum: number, row: any) => sum + Number(row.asking_price_cents ?? 0), 0);
 
+  let publishedJamCount = 0;
+  const userEmail = typeof user.email === 'string' ? user.email.trim() : '';
+  if (userEmail) {
+    const jamCountResult = await supabase
+      .from('jams')
+      .select('id', { count: 'exact', head: true })
+      .eq('founder_email', userEmail);
+
+    if (jamCountResult.error) {
+      if (!isRecoverableSchemaError(jamCountResult.error)) {
+        throw jamCountResult.error;
+      }
+    } else {
+      publishedJamCount = jamCountResult.count ?? 0;
+    }
+  }
+
   const conversations = Array.isArray(conversationsResult.data) ? conversationsResult.data : [];
   const conversationIds = conversations.map((row: any) => row.id);
 
@@ -893,8 +962,8 @@ const handleProfileSummary = async (req: any, res: any, user: any, supabase: any
   return sendJson(res, 200, {
     data: {
       roles: {
-        seller: assets.length > 0,
-        buyer: buyerEnabled || offersCount > 0 || pipelineCount > 0 || wishlistCount > 0,
+        seller: assets.length > 0 || publishedJamCount > 0,
+        buyer: true,
         buyerEnabled,
       },
       stats: {

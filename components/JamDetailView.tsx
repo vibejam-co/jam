@@ -1,20 +1,28 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, Heart, ExternalLink, ShieldCheck, Flame, Users, 
-  TrendingUp, CreditCard, Layout, Zap, ArrowRight, User, PencilLine
+  TrendingUp, CreditCard, Layout, Zap, ArrowRight, PencilLine, Activity, Globe2, Info, Sparkles
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, 
   Tooltip, ResponsiveContainer 
 } from 'recharts';
-import { VibeApp } from '../types';
+import { MarketplacePitchDecks, VibeApp } from '../types';
 import GemstoneIcon from './GemstoneIcon';
 import RankingBadge from './RankingBadge';
-import { startInboxConversation, submitMarketplaceOffer } from '../lib/api';
+import {
+  fetchMarketplaceAssetDeck,
+  generateMarketplaceAssetDeck,
+  startInboxConversation,
+  submitMarketplaceOffer,
+  updateMarketplaceAssetFinancials,
+  updateMarketplaceAssetTraffic,
+} from '../lib/api';
 import { supabase } from '../lib/supabase-client';
 import ListingEditModal, { ListingEditSeed } from './ListingEditModal';
+import DeckViewer from './DeckViewer';
 
 interface JamDetailViewProps {
   app: VibeApp | null;
@@ -40,6 +48,34 @@ const normalizeWebsiteUrl = (input: unknown): string | null => {
   return null;
 };
 
+const isImageSource = (value: unknown): value is string => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return Boolean(
+    normalized.startsWith('data:image/')
+    || normalized.startsWith('https://')
+    || normalized.startsWith('http://')
+    || normalized.startsWith('blob:')
+    || normalized.startsWith('/'),
+  );
+};
+
+const getDeckCoverImage = (decks: MarketplacePitchDecks | null): string | null => {
+  if (!decks || !Array.isArray(decks.slides)) {
+    return null;
+  }
+  const firstImage = decks.slides.find((slide) => typeof slide.imageUrl === 'string' && slide.imageUrl.trim());
+  return firstImage?.imageUrl?.trim() || null;
+};
+
+const isDeckMissingError = (message: string): boolean => {
+  const normalized = String(message ?? '').toLowerCase();
+  return (
+    normalized.includes('not been generated')
+    || normalized.includes('pitch deck not available')
+    || normalized.includes('not found')
+  );
+};
+
 const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWishlist, isInWishlist }) => {
   if (!app) return null;
   const canShowDealActions = Boolean(app.isForSale) && !Boolean(app.isOwnerListing);
@@ -54,6 +90,22 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [offerError, setOfferError] = useState<string | null>(null);
   const [offerSuccess, setOfferSuccess] = useState<string | null>(null);
+  const [isExpensesModalOpen, setIsExpensesModalOpen] = useState(false);
+  const [isTrafficModalOpen, setIsTrafficModalOpen] = useState(false);
+  const [monthlyExpensesInput, setMonthlyExpensesInput] = useState('');
+  const [trafficUsersInput, setTrafficUsersInput] = useState('');
+  const [analyticsProofInput, setAnalyticsProofInput] = useState('');
+  const [isSavingExpenses, setIsSavingExpenses] = useState(false);
+  const [isSavingTraffic, setIsSavingTraffic] = useState(false);
+  const [expensesModalError, setExpensesModalError] = useState<string | null>(null);
+  const [trafficModalError, setTrafficModalError] = useState<string | null>(null);
+  const [expensesModalSuccess, setExpensesModalSuccess] = useState<string | null>(null);
+  const [trafficModalSuccess, setTrafficModalSuccess] = useState<string | null>(null);
+  const [deckPayload, setDeckPayload] = useState<MarketplacePitchDecks | null>(null);
+  const [isDeckViewerOpen, setIsDeckViewerOpen] = useState(false);
+  const [isDeckLoading, setIsDeckLoading] = useState(false);
+  const [deckError, setDeckError] = useState<string | null>(null);
+  const [deckCoverImageUrl, setDeckCoverImageUrl] = useState<string | null>(null);
 
   const listingEditSeed: ListingEditSeed | null = useMemo(() => {
     if (!app.marketplaceAssetId || !app.isOwnerListing) {
@@ -99,6 +151,119 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
   const formattedMonthly = new Intl.NumberFormat('en-US', {
     style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1
   }).format(app.monthlyRevenue);
+
+  const formatMoneyFromCents = (cents: number) =>
+    new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(Math.max(0, cents) / 100);
+
+  const formatVisitors = (value: number) => {
+    if (value >= 1_000_000) {
+      return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+    }
+    if (value >= 1_000) {
+      return `${(value / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
+    }
+    return String(value);
+  };
+
+  const resolvedProfitMarginPct = useMemo(() => {
+    if (typeof app.profitMarginBps === 'number' && Number.isFinite(app.profitMarginBps)) {
+      return Math.max(0, app.profitMarginBps / 100);
+    }
+    if (typeof app.profitMargin === 'number' && Number.isFinite(app.profitMargin)) {
+      return Math.max(0, app.profitMargin);
+    }
+    return null;
+  }, [app.profitMargin, app.profitMarginBps]);
+
+  const resolvedNetProfitCents = useMemo(() => {
+    if (typeof app.netProfitCents === 'number' && Number.isFinite(app.netProfitCents)) {
+      return Math.round(app.netProfitCents);
+    }
+    if (resolvedProfitMarginPct === null || !Number.isFinite(app.monthlyRevenue) || app.monthlyRevenue <= 0) {
+      return null;
+    }
+    return Math.round(app.monthlyRevenue * (resolvedProfitMarginPct / 100) * 100);
+  }, [app.monthlyRevenue, app.netProfitCents, resolvedProfitMarginPct]);
+
+  const resolvedChurnPct = useMemo(() => {
+    if (typeof app.churnBps !== 'number' || !Number.isFinite(app.churnBps)) {
+      return null;
+    }
+    return Math.max(0, app.churnBps / 100);
+  }, [app.churnBps]);
+
+  const resolvedTraffic = useMemo(() => {
+    if (typeof app.monthlyUniqueVisitors !== 'number' || !Number.isFinite(app.monthlyUniqueVisitors)) {
+      return null;
+    }
+    return Math.max(0, Math.round(app.monthlyUniqueVisitors));
+  }, [app.monthlyUniqueVisitors]);
+
+  const analyticsProofUrl = useMemo(() => {
+    const candidate = (app as { analyticsProofUrl?: string | null }).analyticsProofUrl;
+    return typeof candidate === 'string' ? candidate : '';
+  }, [app]);
+
+  const estimatedMonthlyExpensesUsd = useMemo(() => {
+    if (resolvedNetProfitCents === null) {
+      return 0;
+    }
+    const netProfitUsd = resolvedNetProfitCents / 100;
+    return Math.max(0, Math.round((app.monthlyRevenue - netProfitUsd) * 100) / 100);
+  }, [app.monthlyRevenue, resolvedNetProfitCents]);
+
+  const canUpdateHealthMetrics = Boolean(app.isOwnerListing && app.marketplaceAssetId);
+
+  useEffect(() => {
+    setMonthlyExpensesInput(estimatedMonthlyExpensesUsd > 0 ? String(estimatedMonthlyExpensesUsd) : '');
+    setTrafficUsersInput(String(resolvedTraffic ?? Math.max(0, app.activeUsers || 0)));
+    setAnalyticsProofInput(analyticsProofUrl);
+    setExpensesModalError(null);
+    setTrafficModalError(null);
+    setExpensesModalSuccess(null);
+    setTrafficModalSuccess(null);
+  }, [analyticsProofUrl, app.activeUsers, app.id, estimatedMonthlyExpensesUsd, resolvedTraffic]);
+
+  useEffect(() => {
+    const fallbackCover =
+      (isImageSource((app as any).pitchDeckCoverImageUrl) ? String((app as any).pitchDeckCoverImageUrl).trim() : null)
+      || (isImageSource(app.icon) ? app.icon : null);
+
+    setDeckPayload(null);
+    setDeckError(null);
+    setIsDeckViewerOpen(false);
+    setDeckCoverImageUrl(fallbackCover);
+
+    if (!app.marketplaceAssetId) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetchMarketplaceAssetDeck(app.marketplaceAssetId as string);
+        if (cancelled) {
+          return;
+        }
+        setDeckPayload(response.pitchDecks);
+        const cover = getDeckCoverImage(response.pitchDecks);
+        if (cover) {
+          setDeckCoverImageUrl(cover);
+        }
+      } catch {
+        // Silent prefetch fallback.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [app.id, app.icon, app.marketplaceAssetId]);
 
   const handleSubmitOffer = async () => {
     if (!app.marketplaceAssetId) {
@@ -218,6 +383,143 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
     }
   };
 
+  const openExpensesModal = () => {
+    if (!canUpdateHealthMetrics) {
+      return;
+    }
+    setExpensesModalError(null);
+    setExpensesModalSuccess(null);
+    setIsExpensesModalOpen(true);
+  };
+
+  const openTrafficModal = () => {
+    if (!canUpdateHealthMetrics) {
+      return;
+    }
+    setTrafficModalError(null);
+    setTrafficModalSuccess(null);
+    setIsTrafficModalOpen(true);
+  };
+
+  const handleSubmitExpenses = async () => {
+    const assetId = app.marketplaceAssetId;
+    if (!assetId) {
+      setExpensesModalError('Listing is not connected yet. Publish to Marketplace first.');
+      return;
+    }
+
+    const parsedExpenses = Number(monthlyExpensesInput);
+    if (!Number.isFinite(parsedExpenses) || parsedExpenses < 0) {
+      setExpensesModalError('Enter a valid non-negative expenses amount.');
+      return;
+    }
+
+    setIsSavingExpenses(true);
+    setExpensesModalError(null);
+    setExpensesModalSuccess(null);
+    try {
+      await updateMarketplaceAssetFinancials(assetId, {
+        operatingExpenses: parsedExpenses,
+      });
+      setExpensesModalSuccess('Expenses saved. Profit Margin updated.');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('marketplace:refresh'));
+        window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
+      }
+      window.setTimeout(() => setIsExpensesModalOpen(false), 650);
+    } catch (error) {
+      setExpensesModalError(error instanceof Error ? error.message : 'Failed to update expenses.');
+    } finally {
+      setIsSavingExpenses(false);
+    }
+  };
+
+  const handleSubmitTraffic = async () => {
+    const assetId = app.marketplaceAssetId;
+    if (!assetId) {
+      setTrafficModalError('Listing is not connected yet. Publish to Marketplace first.');
+      return;
+    }
+
+    const parsedVisitors = Number(trafficUsersInput);
+    if (!Number.isFinite(parsedVisitors) || parsedVisitors < 0) {
+      setTrafficModalError('Enter a valid non-negative users value.');
+      return;
+    }
+
+    setIsSavingTraffic(true);
+    setTrafficModalError(null);
+    setTrafficModalSuccess(null);
+    try {
+      await updateMarketplaceAssetTraffic(assetId, {
+        monthlyUniqueVisitors: Math.round(parsedVisitors),
+        analyticsProofUrl: analyticsProofInput.trim() || undefined,
+      });
+      setTrafficModalSuccess('Traffic verification updated.');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('marketplace:refresh'));
+        window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
+      }
+      window.setTimeout(() => setIsTrafficModalOpen(false), 650);
+    } catch (error) {
+      setTrafficModalError(error instanceof Error ? error.message : 'Failed to update traffic.');
+    } finally {
+      setIsSavingTraffic(false);
+    }
+  };
+
+  const handleOpenPitchDeck = async () => {
+    if (!app.marketplaceAssetId) {
+      setDeckError('Pitch deck becomes available once this app is listed on Marketplace.');
+      return;
+    }
+
+    if (isDeckLoading) {
+      return;
+    }
+
+    setDeckError(null);
+    if (deckPayload) {
+      setIsDeckViewerOpen(true);
+      return;
+    }
+
+    setIsDeckLoading(true);
+    try {
+      let resolvedPayload: MarketplacePitchDecks | null = null;
+
+      try {
+        const response = await fetchMarketplaceAssetDeck(app.marketplaceAssetId);
+        resolvedPayload = response.pitchDecks;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Pitch deck is not available.';
+        if (app.isOwnerListing && isDeckMissingError(message)) {
+          const generated = await generateMarketplaceAssetDeck(app.marketplaceAssetId, {
+            forceRegenerate: false,
+          });
+          resolvedPayload = generated.pitchDecks;
+        } else {
+          throw error;
+        }
+      }
+
+      if (!resolvedPayload) {
+        throw new Error('Deck payload unavailable.');
+      }
+
+      setDeckPayload(resolvedPayload);
+      const cover = getDeckCoverImage(resolvedPayload);
+      if (cover) {
+        setDeckCoverImageUrl(cover);
+      }
+      setIsDeckViewerOpen(true);
+    } catch (error) {
+      setDeckError(error instanceof Error ? error.message : 'Unable to open pitch deck right now.');
+    } finally {
+      setIsDeckLoading(false);
+    }
+  };
+
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       return (
@@ -273,6 +575,17 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
             >
               Website <ExternalLink className="w-3.5 h-3.5" />
             </a>
+            {app.marketplaceAssetId && (
+              <button
+                type="button"
+                onClick={handleOpenPitchDeck}
+                disabled={isDeckLoading}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition-all hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {isDeckLoading ? 'Loading Deck...' : 'View Pitch Deck'}
+              </button>
+            )}
             {canShowDealActions && (
               <button
                 onClick={() => {
@@ -468,6 +781,98 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
             ))}
           </section>
 
+          {/* SECTION A2: VERIFIED HEALTH LAYER */}
+          <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <button
+              type="button"
+              onClick={openExpensesModal}
+              disabled={!canUpdateHealthMetrics}
+              className={`relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br ${
+                resolvedNetProfitCents !== null ? 'from-emerald-400/15 to-transparent' : 'from-white/5 to-transparent'
+              } p-5 text-left transition ${
+                canUpdateHealthMetrics ? 'cursor-pointer hover:bg-white/5' : 'cursor-default'
+              }`}
+            >
+              <div className="mb-4 inline-flex rounded-lg bg-white/5 p-2">
+                <TrendingUp className={`h-4 w-4 ${resolvedNetProfitCents !== null ? 'text-emerald-300' : 'text-zinc-500'}`} />
+              </div>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Net Profit (30D)</p>
+              <p className={`text-xl font-black tracking-tight ${resolvedNetProfitCents !== null ? 'text-emerald-300' : 'text-zinc-500'}`}>
+                {resolvedNetProfitCents !== null ? formatMoneyFromCents(resolvedNetProfitCents) : 'Pending'}
+              </p>
+              <p className="mt-1 text-[11px] text-zinc-500">Input 30-day expenses to calculate margin.</p>
+            </button>
+
+            <div
+              className={`relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br ${
+                resolvedChurnPct === null
+                  ? 'from-white/5 to-transparent'
+                  : resolvedChurnPct < 5
+                    ? 'from-emerald-400/15 to-transparent'
+                    : resolvedChurnPct <= 10
+                      ? 'from-yellow-400/15 to-transparent'
+                      : 'from-red-400/15 to-transparent'
+              } p-5`}
+            >
+              <div className="mb-4 inline-flex rounded-lg bg-white/5 p-2">
+                <Activity
+                  className={`h-4 w-4 ${
+                    resolvedChurnPct === null
+                      ? 'text-zinc-500'
+                      : resolvedChurnPct < 5
+                        ? 'text-emerald-300'
+                        : resolvedChurnPct <= 10
+                          ? 'text-yellow-300'
+                          : 'text-red-300'
+                  }`}
+                />
+              </div>
+              <div className="mb-1 flex items-center gap-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Churn Rate</p>
+                <div className="group relative">
+                  <Info className="h-3.5 w-3.5 text-zinc-500" />
+                  <div className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 hidden w-64 -translate-x-1/2 rounded-xl border border-white/15 bg-black/90 p-3 text-[10px] text-zinc-300 shadow-2xl group-hover:block">
+                    VibeJam actively queries your read-only API to compare canceled vs. active subscriptions. This syncs automatically.
+                  </div>
+                </div>
+              </div>
+              <p
+                className={`text-xl font-black tracking-tight ${
+                  resolvedChurnPct === null
+                    ? 'text-zinc-500'
+                    : resolvedChurnPct < 5
+                      ? 'text-emerald-300'
+                      : resolvedChurnPct <= 10
+                        ? 'text-yellow-300'
+                        : 'text-red-300'
+                }`}
+              >
+                {resolvedChurnPct !== null ? `${resolvedChurnPct.toFixed(1).replace(/\.0$/, '')}%` : 'Pending'}
+              </p>
+              <p className="mt-1 text-[11px] text-zinc-500">Auto-syncing via payment provider.</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={openTrafficModal}
+              disabled={!canUpdateHealthMetrics}
+              className={`relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br ${
+                resolvedTraffic !== null ? 'from-cyan-400/15 to-transparent' : 'from-white/5 to-transparent'
+              } p-5 text-left transition ${
+                canUpdateHealthMetrics ? 'cursor-pointer hover:bg-white/5' : 'cursor-default'
+              }`}
+            >
+              <div className="mb-4 inline-flex rounded-lg bg-white/5 p-2">
+                <Globe2 className={`h-4 w-4 ${resolvedTraffic !== null ? 'text-cyan-300' : 'text-zinc-500'}`} />
+              </div>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Web Traffic (30D)</p>
+              <p className={`text-xl font-black tracking-tight ${resolvedTraffic !== null ? 'text-cyan-300' : 'text-zinc-500'}`}>
+                {resolvedTraffic !== null ? `${formatVisitors(resolvedTraffic)} visits` : 'Pending'}
+              </p>
+              <p className="mt-1 text-[11px] text-zinc-500">Add public link or Loom to verify.</p>
+            </button>
+          </section>
+
           {/* SECTION B: REVENUE SPINE */}
           <section className="p-8 rounded-[24px] bg-white/[0.02] border border-white/5">
             <div className="flex items-center justify-between mb-8">
@@ -549,6 +954,35 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
             </div>
           </section>
 
+          <section className="space-y-3">
+            <button
+              type="button"
+              onClick={handleOpenPitchDeck}
+              className="group relative flex h-32 w-full cursor-pointer items-center overflow-hidden rounded-xl border border-white/10 px-6"
+            >
+              {deckCoverImageUrl && (
+                <div
+                  className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+                  style={{ backgroundImage: `url(${deckCoverImageUrl})` }}
+                />
+              )}
+              <div className="absolute inset-0 bg-black/60 transition-all group-hover:bg-black/40" />
+              <div className="relative z-10 flex w-full items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-xl font-black tracking-tight text-white">Investor Pitch Deck</h4>
+                  <p className="mt-1 text-sm text-zinc-300">
+                    Generated by Gemini 3 Pro. Includes verified financials, tech stack, and M&amp;A terms.
+                  </p>
+                </div>
+                <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/30 px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white backdrop-blur-md">
+                  {deckPayload ? 'View Deck' : app.isOwnerListing ? 'Generate Deck' : 'View Deck'}
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </span>
+              </div>
+            </button>
+            {deckError && <p className="text-xs text-red-400">{deckError}</p>}
+          </section>
+
           {/* SECTION D: INSIGHTS */}
           <section className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-4 pb-12">
             <div>
@@ -579,6 +1013,144 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
       </motion.div>
 
       <AnimatePresence>
+        {isExpensesModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[130] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setIsExpensesModalOpen(false)}
+          >
+            <motion.div
+              initial={{ y: 20, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 16, opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="w-full max-w-xl rounded-3xl border border-white/10 bg-[#070707] p-6 shadow-[0_40px_120px_-40px_rgba(0,0,0,1)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-5">
+                <h3 className="text-xl font-black tracking-tight text-white">Verify Your Profitability</h3>
+                <p className="mt-2 text-sm text-zinc-400">
+                  Buyers buy profit, not just revenue. Enter your trailing 30-day operating costs to calculate your official Profit Margin %.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Monthly Expenses (USD)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={monthlyExpensesInput}
+                  onChange={(event) => setMonthlyExpensesInput(event.target.value)}
+                  className="h-12 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-white focus:outline-none focus:border-white/30"
+                  placeholder="e.g. 1200"
+                />
+              </div>
+
+              {expensesModalError && <p className="mt-3 text-xs text-red-400">{expensesModalError}</p>}
+              {expensesModalSuccess && <p className="mt-3 text-xs text-emerald-400">{expensesModalSuccess}</p>}
+
+              <div className="mt-6 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsExpensesModalOpen(false)}
+                  className="h-11 rounded-full border border-white/15 px-5 text-[11px] font-black uppercase tracking-widest text-zinc-300 hover:bg-white hover:text-black transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitExpenses}
+                  disabled={isSavingExpenses || !canUpdateHealthMetrics}
+                  className="h-11 rounded-full bg-white px-5 text-[11px] font-black uppercase tracking-widest text-black hover:bg-zinc-200 transition-all disabled:opacity-60"
+                >
+                  {isSavingExpenses ? 'Saving...' : 'Update Expenses'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isTrafficModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[130] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={() => setIsTrafficModalOpen(false)}
+          >
+            <motion.div
+              initial={{ y: 20, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 16, opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="w-full max-w-xl rounded-3xl border border-white/10 bg-[#070707] p-6 shadow-[0_40px_120px_-40px_rgba(0,0,0,1)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-5">
+                <h3 className="text-xl font-black tracking-tight text-white">Verify Your Web Traffic</h3>
+                <p className="mt-2 text-sm text-zinc-400">
+                  Buyers calculate valuation multiples based on your conversion rates. Paste a link to a public Plausible dashboard or a Loom video showing your GA4 dashboard.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                    Active Users (Last 30 Days)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={trafficUsersInput}
+                    onChange={(event) => setTrafficUsersInput(event.target.value)}
+                    className="h-12 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-white focus:outline-none focus:border-white/30"
+                    placeholder="e.g. 9200"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                    Analytics Proof URL
+                  </label>
+                  <input
+                    type="url"
+                    value={analyticsProofInput}
+                    onChange={(event) => setAnalyticsProofInput(event.target.value)}
+                    className="h-12 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-white focus:outline-none focus:border-white/30"
+                    placeholder="e.g. https://plausible.io/... or Loom URL"
+                  />
+                </div>
+              </div>
+
+              {trafficModalError && <p className="mt-3 text-xs text-red-400">{trafficModalError}</p>}
+              {trafficModalSuccess && <p className="mt-3 text-xs text-emerald-400">{trafficModalSuccess}</p>}
+
+              <div className="mt-6 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsTrafficModalOpen(false)}
+                  className="h-11 rounded-full border border-white/15 px-5 text-[11px] font-black uppercase tracking-widest text-zinc-300 hover:bg-white hover:text-black transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitTraffic}
+                  disabled={isSavingTraffic || !canUpdateHealthMetrics}
+                  className="h-11 rounded-full bg-white px-5 text-[11px] font-black uppercase tracking-widest text-black hover:bg-zinc-200 transition-all disabled:opacity-60"
+                >
+                  {isSavingTraffic ? 'Saving...' : 'Update Traffic'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {isEditOpen && listingEditSeed && (
           <ListingEditModal
             seed={listingEditSeed}
@@ -589,6 +1161,16 @@ const JamDetailView: React.FC<JamDetailViewProps> = ({ app, onClose, onToggleWis
                 window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
               }
             }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isDeckViewerOpen && deckPayload && (
+          <DeckViewer
+            assetName={app.name}
+            decks={deckPayload}
+            onClose={() => setIsDeckViewerOpen(false)}
           />
         )}
       </AnimatePresence>

@@ -24,9 +24,13 @@ export type ProviderValidationResult = {
   providerAccountId?: string | null;
 };
 
+export type ProviderValidateOptions = {
+  providerAccountId?: string | null;
+};
+
 export interface ProviderAdapter {
   provider: ProviderName;
-  validateKey(key: string): Promise<ProviderValidationResult>;
+  validateKey(key: string, options?: ProviderValidateOptions): Promise<ProviderValidationResult>;
   fetchHistoricalTransactions(key: string, since: Date): AsyncGenerator<NormalizedTransaction>;
   computeMetrics(transactions: NormalizedTransaction[]): Promise<ProviderMetrics> | ProviderMetrics;
 }

@@ -13,7 +13,11 @@ import { sendOfferNotificationEmail } from '../../lib/server/email.js';
 import { writeMarketplaceAuditLog } from '../../lib/server/marketplace-audit.js';
 import { checkRateLimit } from '../../lib/server/rate-limit.js';
 import { ensureConversation, upsertPipelineStage } from '../../lib/server/profile-marketplace.js';
-import { createEscrowTransaction, fetchEscrowTransaction } from '../../lib/server/escrow.js';
+import {
+  createEscrowTransaction,
+  fetchEscrowTransaction,
+  getEscrowTransactionPortalUrl,
+} from '../../lib/server/escrow.js';
 import { handleEscrowWebhook } from '../../lib/server/escrow-webhook.js';
 
 const OfferStatusUpdateSchema = z.object({
@@ -1117,78 +1121,98 @@ const handlePostDealRoomEscrow = async (req: any, res: any) => {
     });
   }
 
-  if (transactionAlreadyExists) {
-    let landingPage: string | null = null;
-    let nextEscrowStatus: string | null = context.escrowStatus ?? null;
+  try {
+    if (transactionAlreadyExists) {
+      let landingPage: string | null = null;
+      let nextEscrowStatus: string | null = context.escrowStatus ?? null;
+      let transactionPortalUrl: string | null = getEscrowTransactionPortalUrl(context.escrowTransactionId ?? '');
 
-    try {
-      const escrowSnapshot = await fetchEscrowTransaction(context.escrowTransactionId);
-      landingPage = escrowSnapshot.buyerLandingPage ?? null;
-      nextEscrowStatus = escrowSnapshot.escrowStatus ?? nextEscrowStatus;
-      await persistEscrowStateForContext({
-        supabase,
-        context,
-        escrowTransactionId: escrowSnapshot.transactionId,
-        escrowStatus: nextEscrowStatus,
+      try {
+        const escrowSnapshot = await fetchEscrowTransaction(context.escrowTransactionId);
+        landingPage = escrowSnapshot.buyerLandingPage ?? null;
+        transactionPortalUrl = escrowSnapshot.transactionPortalUrl ?? transactionPortalUrl;
+        nextEscrowStatus = escrowSnapshot.escrowStatus ?? nextEscrowStatus;
+        await persistEscrowStateForContext({
+          supabase,
+          context,
+          escrowTransactionId: escrowSnapshot.transactionId,
+          escrowStatus: nextEscrowStatus,
+        });
+      } catch {
+        // Keep request resilient if Escrow lookup is temporarily unavailable.
+      }
+
+      const refreshed = await resolveDealRoomContext(supabase, offerId);
+      return sendJson(res, 200, {
+        data: {
+          transactionId: context.escrowTransactionId,
+          escrowStatus: nextEscrowStatus,
+          landingPage: landingPage ?? transactionPortalUrl,
+          transactionPortalUrl,
+          existingTransaction: true,
+          ...(refreshed ? dealRoomResponse(refreshed, user.id) : {}),
+        },
       });
-    } catch {
-      // Keep request resilient if Escrow lookup is temporarily unavailable.
     }
 
+    const escrowCreateResult = await createEscrowTransaction({
+      description: `VibeJam Acquisition: ${safeAssetTitle}`,
+      title: safeAssetTitle,
+      itemDescription: `Full transfer of source code, domains, and IP for ${safeAssetTitle}`,
+      priceUsd: agreedPriceUsd,
+      buyerEmail: context.buyerEmail,
+      sellerEmail: context.sellerEmail,
+    });
+
+    await persistEscrowStateForContext({
+      supabase,
+      context,
+      escrowTransactionId: escrowCreateResult.transactionId,
+      escrowStatus: escrowCreateResult.escrowStatus,
+    });
+
+    await writeMarketplaceAuditLog({
+      actorUserId: user.id,
+      assetId: context.assetId,
+      action: 'deal_room_escrow_created',
+      severity: 'INFO',
+      reason: 'ESCROW_CREATED',
+      metadata: {
+        offer_id: context.legacyOfferId,
+        domain_offer_id: context.domainOffer?.id ?? null,
+        escrow_transaction_id: escrowCreateResult.transactionId,
+        escrow_status: escrowCreateResult.escrowStatus,
+        buyer_email: context.buyerEmail,
+        seller_email: context.sellerEmail,
+      },
+    });
+
     const refreshed = await resolveDealRoomContext(supabase, offerId);
-    return sendJson(res, 200, {
+    const transactionPortalUrl =
+      escrowCreateResult.transactionPortalUrl
+      ?? getEscrowTransactionPortalUrl(escrowCreateResult.transactionId);
+    return sendJson(res, 201, {
       data: {
-        transactionId: context.escrowTransactionId,
-        escrowStatus: nextEscrowStatus,
-        landingPage,
-        existingTransaction: true,
+        transactionId: escrowCreateResult.transactionId,
+        escrowStatus: escrowCreateResult.escrowStatus,
+        landingPage: escrowCreateResult.buyerLandingPage ?? transactionPortalUrl,
+        transactionPortalUrl,
+        existingTransaction: false,
         ...(refreshed ? dealRoomResponse(refreshed, user.id) : {}),
       },
     });
+  } catch (error) {
+    const detail = sanitizeErrorDetails(error);
+    const normalized = detail.toLowerCase();
+    if (normalized.includes('escrow api')) {
+      return sendJson(res, 502, {
+        error: 'Escrow request failed.',
+        details: detail,
+        code: 'ESCROW_API_ERROR',
+      });
+    }
+    throw error;
   }
-
-  const escrowCreateResult = await createEscrowTransaction({
-    description: `VibeJam Acquisition: ${safeAssetTitle}`,
-    title: safeAssetTitle,
-    itemDescription: `Full transfer of source code, domains, and IP for ${safeAssetTitle}`,
-    priceUsd: agreedPriceUsd,
-    buyerEmail: context.buyerEmail,
-    sellerEmail: context.sellerEmail,
-  });
-
-  await persistEscrowStateForContext({
-    supabase,
-    context,
-    escrowTransactionId: escrowCreateResult.transactionId,
-    escrowStatus: escrowCreateResult.escrowStatus,
-  });
-
-  await writeMarketplaceAuditLog({
-    actorUserId: user.id,
-    assetId: context.assetId,
-    action: 'deal_room_escrow_created',
-    severity: 'INFO',
-    reason: 'ESCROW_CREATED',
-    metadata: {
-      offer_id: context.legacyOfferId,
-      domain_offer_id: context.domainOffer?.id ?? null,
-      escrow_transaction_id: escrowCreateResult.transactionId,
-      escrow_status: escrowCreateResult.escrowStatus,
-      buyer_email: context.buyerEmail,
-      seller_email: context.sellerEmail,
-    },
-  });
-
-  const refreshed = await resolveDealRoomContext(supabase, offerId);
-  return sendJson(res, 201, {
-    data: {
-      transactionId: escrowCreateResult.transactionId,
-      escrowStatus: escrowCreateResult.escrowStatus,
-      landingPage: escrowCreateResult.buyerLandingPage,
-      existingTransaction: false,
-      ...(refreshed ? dealRoomResponse(refreshed, user.id) : {}),
-    },
-  });
 };
 
 export default async function handler(req: any, res: any) {

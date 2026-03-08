@@ -11,6 +11,7 @@ import { toMarketplaceCard } from '../../lib/server/marketplace-transformers.js'
 
 const SELECT_FIELDS = [
   'id',
+  'jam_id',
   'slug',
   'name',
   'tagline',
@@ -218,6 +219,7 @@ export default async function handler(req: any, res: any) {
 
             return {
               ...toMarketplaceCard(hydratedAsset, { viewerUserId: user.id }),
+              jamId: asset.jam_id ? String(asset.jam_id) : null,
               offers: byAsset[asset.id] ?? {
                 total: 0,
                 sent: 0,

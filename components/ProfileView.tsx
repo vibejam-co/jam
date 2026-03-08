@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -25,10 +25,19 @@ import {
   Lock,
   Loader2,
   Trash2,
+  Sparkles,
 } from 'lucide-react';
-import { VibeApp, MarketplaceOwnerAsset, AcquireStage, DealRoomData, DealRoomStatus } from '../types';
+import {
+  VibeApp,
+  MarketplaceOwnerAsset,
+  AcquireStage,
+  DealRoomData,
+  DealRoomStatus,
+  MarketplacePitchDecks,
+} from '../types';
 import GemstoneIcon from './GemstoneIcon';
 import ListingEditModal, { ListingEditSeed } from './ListingEditModal';
+import DeckViewer from './DeckViewer';
 import {
   fetchProfileMarketplaceSummary,
   fetchInboxConversations,
@@ -40,6 +49,7 @@ import {
   fetchMyMarketplaceAssets,
   fetchDealRoom,
   initiateDealRoomEscrow,
+  generateMarketplaceAssetDeck,
 } from '../lib/api';
 
 interface ProfileViewProps {
@@ -58,7 +68,7 @@ interface ProfileViewProps {
   onListJamOnMarketplace?: (app: VibeApp) => Promise<void> | void;
 }
 
-type ProfileTab = 'Inbox' | 'Acquire' | 'Wishlist' | 'My Jams' | 'Settings';
+type ProfileTab = 'Inbox' | 'Deal Room' | 'Wishlist' | 'My Jams' | 'Settings';
 type ProfileMode = 'buyer' | 'seller';
 
 const ACQUIRE_PROGRESS_ORDER: AcquireStage[] = [
@@ -282,6 +292,13 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   const [jamActionError, setJamActionError] = useState<string | null>(null);
   const [listingJamId, setListingJamId] = useState<string | null>(null);
   const [deletingJamId, setDeletingJamId] = useState<string | null>(null);
+  const [deckError, setDeckError] = useState<string | null>(null);
+  const [deckGeneratingAssetId, setDeckGeneratingAssetId] = useState<string | null>(null);
+  const [deckGenerationStatus, setDeckGenerationStatus] = useState<string | null>(null);
+  const [deckViewerAsset, setDeckViewerAsset] = useState<MarketplaceOwnerAsset | null>(null);
+  const [deckViewerPayload, setDeckViewerPayload] = useState<MarketplacePitchDecks | null>(null);
+  const [deckCacheByAssetId, setDeckCacheByAssetId] = useState<Record<string, MarketplacePitchDecks>>({});
+  const previousHasSellerSurfaceRef = useRef<boolean | null>(null);
 
   const profileModeStorageKey = useMemo(
     () => `vibejam:profile-mode:${String(handle || displayName || 'guest').trim().toLowerCase()}`,
@@ -291,6 +308,33 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   useEffect(() => {
     setHasInitializedProfileMode(false);
   }, [profileModeStorageKey]);
+
+  useEffect(() => {
+    if (!deckGeneratingAssetId) {
+      setDeckGenerationStatus(null);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const updateStatus = () => {
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      let label = 'Analyzing VibeJam Financials...';
+
+      if (elapsedSeconds >= 15) {
+        label = 'Finalizing PDF...';
+      } else if (elapsedSeconds >= 8) {
+        label = 'Nano Banana 2 rendering slide visuals...';
+      } else if (elapsedSeconds >= 3) {
+        label = 'Gemini 3 Pro drafting M&A narrative...';
+      }
+
+      setDeckGenerationStatus(`${elapsedSeconds}s · ${label}`);
+    };
+
+    updateStatus();
+    const timer = window.setInterval(updateStatus, 800);
+    return () => window.clearInterval(timer);
+  }, [deckGeneratingAssetId]);
 
   const refreshConversations = async () => {
     try {
@@ -386,7 +430,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   }, []);
 
   useEffect(() => {
-    if (profileMode !== 'buyer' || activeTab !== 'Acquire') {
+    if (profileMode !== 'buyer' || activeTab !== 'Deal Room') {
       return;
     }
 
@@ -463,9 +507,9 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     if (typeof window !== 'undefined') {
       const saved = window.localStorage.getItem(profileModeStorageKey);
       if (saved === 'buyer' || saved === 'seller') {
-        if (!hasPublishedSellerSurface && saved === 'seller') {
-          nextMode = 'buyer';
-          window.localStorage.setItem(profileModeStorageKey, 'buyer');
+        if (hasPublishedSellerSurface) {
+          nextMode = 'seller';
+          window.localStorage.setItem(profileModeStorageKey, 'seller');
         } else {
           nextMode = saved;
         }
@@ -473,7 +517,34 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     }
 
     setProfileMode(nextMode);
+    previousHasSellerSurfaceRef.current = hasPublishedSellerSurface;
     setHasInitializedProfileMode(true);
+  }, [hasBootstrapped, hasInitializedProfileMode, hasPublishedSellerSurface, profileModeStorageKey]);
+
+  useEffect(() => {
+    if (!hasBootstrapped || !hasInitializedProfileMode) {
+      return;
+    }
+
+    const previous = previousHasSellerSurfaceRef.current;
+    if (previous === null) {
+      previousHasSellerSurfaceRef.current = hasPublishedSellerSurface;
+      return;
+    }
+
+    if (!previous && hasPublishedSellerSurface) {
+      setProfileMode('seller');
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(profileModeStorageKey, 'seller');
+      }
+    } else if (previous && !hasPublishedSellerSurface) {
+      setProfileMode('buyer');
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(profileModeStorageKey, 'buyer');
+      }
+    }
+
+    previousHasSellerSurfaceRef.current = hasPublishedSellerSurface;
   }, [hasBootstrapped, hasInitializedProfileMode, hasPublishedSellerSurface, profileModeStorageKey]);
 
   const handleProfileModeChange = (nextMode: ProfileMode) => {
@@ -487,7 +558,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     if (profileMode === 'seller') {
       return ['Inbox', 'My Jams', 'Settings'] as ProfileTab[];
     }
-    return ['Inbox', 'Acquire', 'Wishlist', 'Settings'] as ProfileTab[];
+    return ['Inbox', 'Deal Room', 'Wishlist', 'Settings'] as ProfileTab[];
   }, [profileMode]);
 
   useEffect(() => {
@@ -522,6 +593,21 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     }
 
     return grouped;
+  }, [pipeline]);
+
+  const dealRoomSummary = useMemo(() => {
+    const countFor = (stage: AcquireStage) => (pipelineByStage.get(stage) ?? []).length;
+    const offerSent = countFor('OFFER_SENT');
+    const contracting = countFor('LOI_SIGNED') + countFor('DUE_DILIGENCE') + countFor('APA_SIGNED');
+    const escrowAndClosed = countFor('ESCROW_FUNDED') + countFor('CLOSED');
+    const total = offerSent + contracting + escrowAndClosed;
+    const readyCount = (Array.isArray(pipeline?.items) ? pipeline.items : []).filter((item: any) => Boolean(item?.dealOfferId)).length;
+    return { total, offerSent, contracting, escrowAndClosed, readyCount };
+  }, [pipeline, pipelineByStage]);
+
+  const dealRoomReadyItems = useMemo(() => {
+    const rows = Array.isArray(pipeline?.items) ? pipeline.items : [];
+    return rows.filter((item: any) => Boolean(item?.dealOfferId));
   }, [pipeline]);
 
   const pipelineItemByListingId = useMemo(() => {
@@ -655,9 +741,16 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       if (response.deal) {
         setSelectedDealRoom(response.deal);
       }
-      const landingPage = String(response.landingPage ?? '').trim();
-      if (landingPage) {
-        window.location.href = landingPage;
+      const redirectUrl = String(response.landingPage ?? response.transactionPortalUrl ?? '').trim();
+      if (redirectUrl) {
+        window.location.href = redirectUrl;
+        return;
+      }
+      if (response.transactionId) {
+        setInboxError(
+          `Escrow transaction ${response.transactionId} was created, but redirect URL was not available yet. ` +
+          'Try again in a moment or open your Escrow dashboard directly.',
+        );
         return;
       }
       setInboxError('Escrow vault was created, but no redirect link was returned yet.');
@@ -760,6 +853,37 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       setJamActionError(error instanceof Error ? error.message : 'Failed to delete jam.');
     } finally {
       setDeletingJamId(null);
+    }
+  };
+
+  const handleOpenPitchDeck = async (asset: MarketplaceOwnerAsset, options?: { forceRegenerate?: boolean }) => {
+    const forceRegenerate = Boolean(options?.forceRegenerate);
+    if (deckGeneratingAssetId) {
+      return;
+    }
+
+    const cached = deckCacheByAssetId[asset.id];
+    if (!forceRegenerate && cached) {
+      setDeckViewerAsset(asset);
+      setDeckViewerPayload(cached);
+      setDeckError(null);
+      setDeckGenerationStatus(null);
+      return;
+    }
+
+    setDeckError(null);
+    setDeckGeneratingAssetId(asset.id);
+    try {
+      const response = await generateMarketplaceAssetDeck(asset.id, { forceRegenerate });
+      const payload = response.pitchDecks;
+      setDeckCacheByAssetId((prev) => ({ ...prev, [asset.id]: payload }));
+      setDeckViewerAsset(asset);
+      setDeckViewerPayload(payload);
+    } catch (error) {
+      setDeckError(error instanceof Error ? error.message : 'Failed to generate AI pitch deck.');
+    } finally {
+      setDeckGeneratingAssetId(null);
+      setDeckGenerationStatus(null);
     }
   };
 
@@ -1245,14 +1369,67 @@ const ProfileView: React.FC<ProfileViewProps> = ({
               </motion.div>
             )}
 
-            {activeTab === 'Acquire' && (
+            {activeTab === 'Deal Room' && (
               <motion.div
-                key="acquire"
+                key="deal-room"
                 initial={{ opacity: 0, x: 10 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
                 className="space-y-5"
               >
+                <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-4">
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-widest text-white">Deal Room Summary</h4>
+                    <p className="text-xs text-zinc-500 mt-1">Track all exchange stages and jump directly into active deal rooms.</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2.5">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">All Exchanges</p>
+                      <p className="text-lg font-mono-data text-white mt-1">{dealRoomSummary.total}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2.5">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Offers Sent</p>
+                      <p className="text-lg font-mono-data text-white mt-1">{dealRoomSummary.offerSent}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2.5">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Contracts Active</p>
+                      <p className="text-lg font-mono-data text-white mt-1">{dealRoomSummary.contracting}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2.5">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Escrow / Closed</p>
+                      <p className="text-lg font-mono-data text-white mt-1">{dealRoomSummary.escrowAndClosed}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2.5 flex items-center justify-between gap-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-cyan-200">
+                      Deal Rooms Ready: {dealRoomSummary.readyCount}
+                    </p>
+                    <p className="text-[10px] text-zinc-400">Open a deal room once an offer is created.</p>
+                  </div>
+
+                  {dealRoomReadyItems.length > 0 && (
+                    <div className="space-y-2">
+                      {dealRoomReadyItems.slice(0, 3).map((item: any) => (
+                        <div key={`deal-room-summary-${item.id}`} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-xs text-white font-bold truncate">{item.listing?.name ?? 'Listing'}</p>
+                            <p className="text-[10px] text-zinc-500 uppercase tracking-widest truncate">{item.stageLabel ?? 'Exchange'}</p>
+                          </div>
+                          <a
+                            href={`/deal-room/${encodeURIComponent(String(item.dealOfferId))}`}
+                            className="h-7 px-3 rounded-full border border-cyan-500/25 bg-cyan-500/10 text-[9px] font-black uppercase tracking-widest text-cyan-200 hover:border-cyan-400/45 transition-all inline-flex items-center gap-1.5"
+                          >
+                            <FolderOpen className="w-3 h-3" />
+                            Open Deal Room
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
                 {ACQUIRE_STAGE_ORDER.map((stage) => {
                   const items = pipelineByStage.get(stage) ?? [];
                   const stageLabel =
@@ -1348,17 +1525,36 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                                 <Link2 className="w-3 h-3" />
                                 Open Inbox
                               </button>
+                              {item.dealOfferId && (
+                                <a
+                                  href={`/deal-room/${encodeURIComponent(String(item.dealOfferId))}`}
+                                  className="h-7 px-3 rounded-full border border-white/15 bg-white/[0.02] text-[9px] font-black uppercase tracking-widest text-zinc-300 hover:border-white/30 transition-all inline-flex items-center gap-1.5"
+                                >
+                                  <FolderOpen className="w-3 h-3" />
+                                  Open Deal Room
+                                </a>
+                              )}
                             </div>
 
                             <div className="flex items-center justify-between gap-2">
-                              <button
-                                type="button"
-                                onClick={() => void handleContactFromPipeline(item.listingId)}
-                                className="h-8 px-3 rounded-full border border-white/15 text-[10px] font-black uppercase tracking-widest text-zinc-300 hover:bg-white hover:text-black transition-all"
-                              >
-                                Open Inbox
-                              </button>
-
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleContactFromPipeline(item.listingId)}
+                                  className="h-8 px-3 rounded-full border border-white/15 text-[10px] font-black uppercase tracking-widest text-zinc-300 hover:bg-white hover:text-black transition-all"
+                                >
+                                  Open Inbox
+                                </button>
+                                {item.dealOfferId && (
+                                  <a
+                                    href={`/deal-room/${encodeURIComponent(String(item.dealOfferId))}`}
+                                    className="h-8 px-3 rounded-full border border-cyan-500/25 bg-cyan-500/10 text-[10px] font-black uppercase tracking-widest text-cyan-200 hover:border-cyan-400/45 transition-all inline-flex items-center gap-1.5"
+                                  >
+                                    <FolderOpen className="w-3.5 h-3.5" />
+                                    Deal Room
+                                  </a>
+                                )}
+                              </div>
                               {nextStage && (
                                 <button
                                   type="button"
@@ -1529,6 +1725,18 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
                 )}
 
+                {deckError && (
+                  <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
+                    {deckError}
+                  </div>
+                )}
+
+                {deckGeneratingAssetId && deckGenerationStatus && (
+                  <div className="rounded-2xl border border-cyan-400/25 bg-cyan-500/10 px-4 py-3 text-xs text-cyan-100">
+                    {deckGenerationStatus}
+                  </div>
+                )}
+
                 {myMarketplaceAssets.length > 0 && (
                   <div className="space-y-4">
                     {myMarketplaceAssets.slice(0, 8).map((asset) => (
@@ -1544,14 +1752,29 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                               Listed App
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setEditingListingSeed(toListingEditSeed(asset))}
-                            className="w-8 h-8 rounded-full border border-white/15 text-zinc-300 hover:bg-white hover:text-black transition-all inline-flex items-center justify-center"
-                            aria-label={`Edit ${asset.name}`}
-                          >
-                            <PencilLine className="w-4 h-4" />
-                          </button>
+                          <div className="flex flex-col items-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void handleOpenPitchDeck(asset)}
+                              disabled={deckGeneratingAssetId !== null}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-emerald-400/35 bg-emerald-500/10 px-3 text-[9px] font-black uppercase tracking-widest text-emerald-200 hover:border-emerald-300/55 transition-all disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {deckGeneratingAssetId === asset.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Sparkles className="w-3 h-3" />
+                              )}
+                              {deckGeneratingAssetId === asset.id ? 'Generating…' : 'Generate AI Deck'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingListingSeed(toListingEditSeed(asset))}
+                              className="w-8 h-8 rounded-full border border-white/15 text-zinc-300 hover:bg-white hover:text-black transition-all inline-flex items-center justify-center"
+                              aria-label={`Edit ${asset.name}`}
+                            >
+                              <PencilLine className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-3 gap-4">
@@ -1692,6 +1915,19 @@ const ProfileView: React.FC<ProfileViewProps> = ({
             onDeleted={async () => {
               setEditingListingSeed(null);
               await Promise.all([refreshMyAssets(), refreshSummary(), refreshConversations()]);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {deckViewerAsset && deckViewerPayload && (
+          <DeckViewer
+            assetName={deckViewerAsset.name}
+            decks={deckViewerPayload}
+            onClose={() => {
+              setDeckViewerAsset(null);
+              setDeckViewerPayload(null);
             }}
           />
         )}

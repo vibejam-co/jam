@@ -199,6 +199,35 @@ const normalizeOrder = (raw: unknown): NormalizedTransaction | null => {
   };
 };
 
+const extractLemonSqueezyStoreId = (payload: any): string | null => {
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  if (rows.length === 0) {
+    return null;
+  }
+  const first = rows[0];
+  if (!first || typeof first !== 'object') {
+    return null;
+  }
+  const record = first as Record<string, unknown>;
+  const direct = record.id;
+  if (typeof direct === 'string' && direct.trim()) {
+    return direct.trim();
+  }
+  const attributes =
+    record.attributes && typeof record.attributes === 'object'
+      ? (record.attributes as Record<string, unknown>)
+      : null;
+  if (attributes) {
+    const nestedCandidates = [attributes.id, attributes.store_id, attributes.storeId];
+    for (const candidate of nestedCandidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+  return null;
+};
+
 const computeGrowthBps = (transactions: NormalizedTransaction[]): number => {
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
@@ -229,7 +258,7 @@ const computeGrowthBps = (transactions: NormalizedTransaction[]): number => {
 export const lemonsqueezyAdapter: ProviderAdapter = {
   provider: 'lemonsqueezy',
 
-  async validateKey(key: string) {
+  async validateKey(key: string, _options) {
     const trimmed = key.trim();
     if (!trimmed || trimmed.length < 12) {
       throw new Error('LemonSqueezy key format is invalid.');
@@ -243,8 +272,26 @@ export const lemonsqueezyAdapter: ProviderAdapter = {
       throw new Error(asErrorMessage(ping.payload, ping.status));
     }
 
+    const stores = await lemonsqueezyRequest(trimmed, '/v1/stores', {
+      query: {
+        'page[number]': 1,
+        'page[size]': 1,
+      },
+    });
+    if (stores.status === 401 || stores.status === 403) {
+      throw new Error('Invalid key or insufficient permissions.');
+    }
+    if (stores.status < 200 || stores.status >= 300) {
+      throw new Error(asErrorMessage(stores.payload, stores.status));
+    }
+    const storeId = extractLemonSqueezyStoreId(stores.payload);
+    if (!storeId) {
+      throw new Error('Unable to resolve LemonSqueezy store id from this key.');
+    }
+
     return {
       readOnlyLikely: false,
+      providerAccountId: storeId,
       warning:
         'Use read-only scopes for Orders and Subscriptions in LemonSqueezy for least-privilege access.',
     };
@@ -327,4 +374,3 @@ export const lemonsqueezyAdapter: ProviderAdapter = {
     };
   },
 };
-

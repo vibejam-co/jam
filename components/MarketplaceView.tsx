@@ -115,6 +115,10 @@ const mapAssetToVibeApp = (asset: MarketplaceAssetCard): VibeApp => {
   const rev30Dollars = Math.round(asset.last30dRevenueCents / 100);
   const growthPercent = Number((asset.last30dGrowthBps / 100).toFixed(2));
   const askingPriceLabel = formatCurrencyCompact(asset.askingPriceCents);
+  const netProfitCents =
+    typeof asset.profitMarginBps === 'number' && Number.isFinite(asset.profitMarginBps)
+      ? Math.round(asset.mrrCents * (asset.profitMarginBps / 10_000))
+      : null;
 
   const resolvedMarketplaceAssetId = asset.marketplaceAssetId
     ?? (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(asset.id) ? asset.id : undefined);
@@ -155,6 +159,19 @@ const mapAssetToVibeApp = (asset: MarketplaceAssetCard): VibeApp => {
     valuationMultipleX100: asset.valuationMultipleX100,
     marketplaceVerifiedStatus: asset.verifiedStatus,
     isOwnerListing: Boolean(asset.isOwner),
+    netProfitCents,
+    profitMarginBps:
+      typeof asset.profitMarginBps === 'number' && Number.isFinite(asset.profitMarginBps)
+        ? Math.round(asset.profitMarginBps)
+        : null,
+    monthlyUniqueVisitors:
+      typeof asset.monthlyUniqueVisitors === 'number' && Number.isFinite(asset.monthlyUniqueVisitors)
+        ? Math.max(0, Math.round(asset.monthlyUniqueVisitors))
+        : null,
+    churnBps:
+      typeof asset.churnBps === 'number' && Number.isFinite(asset.churnBps)
+        ? Math.round(asset.churnBps)
+        : null,
   };
 };
 
@@ -180,14 +197,28 @@ const mapFallbackApps = (apps: VibeApp[]): MarketplaceAssetCard[] =>
       mrrCents: Math.max(0, Math.round(app.monthlyRevenue * 100)),
       last30dRevenueCents: Math.max(0, Math.round(app.monthlyRevenue * 100)),
       last30dGrowthBps: Math.round((app.growth || 0) * 100),
-      monthlyUniqueVisitors: Math.max(0, Math.round(Number(app.activeUsers ?? 0))),
+      monthlyUniqueVisitors: Math.max(
+        0,
+        Math.round(
+          Number(
+            typeof app.monthlyUniqueVisitors === 'number'
+              ? app.monthlyUniqueVisitors
+              : app.activeUsers ?? 0,
+          ),
+        ),
+      ),
       analyticsProofUrl: null,
       activeSubscribers: 0,
-      churnBps: null,
+      churnBps:
+        typeof app.churnBps === 'number' && Number.isFinite(app.churnBps)
+          ? Math.round(app.churnBps)
+          : null,
       metricsProvider: null,
       profitMarginPercent: app.profitMargin ?? null,
       profitMarginBps:
-        typeof app.profitMargin === 'number' && Number.isFinite(app.profitMargin)
+        typeof app.profitMarginBps === 'number' && Number.isFinite(app.profitMarginBps)
+          ? Math.round(app.profitMarginBps)
+          : typeof app.profitMargin === 'number' && Number.isFinite(app.profitMargin)
           ? Math.round(app.profitMargin * 100)
           : null,
       valuationMultipleX100: app.valuationMultipleX100 ?? null,

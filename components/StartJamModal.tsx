@@ -1,13 +1,21 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   X, ChevronRight, ChevronLeft, Upload, 
   ShieldCheck, ExternalLink, Info, Globe, 
   HelpCircle, Rocket, DollarSign,
-  Users, Mail, Zap
+  Users, Mail, Zap, Sparkles
 } from 'lucide-react';
-import { VibeApp } from '../types';
+import { MarketplacePitchDecks, VibeApp } from '../types';
+import {
+  createMarketplaceAssetDraft,
+  generateMarketplaceAssetDeck,
+  updateMarketplaceAsset,
+  updateMarketplaceAssetFinancials,
+  updateMarketplaceAssetTraffic,
+} from '../lib/api';
+import DeckViewer from './DeckViewer';
 
 interface StartJamModalProps {
   onClose: () => void;
@@ -25,6 +33,14 @@ const PROVIDERS = [
   { id: 'Dodo', label: 'Dodo Payments', color: 'bg-[#FF4A4A]' },
   { id: 'RevenueCat', label: 'RevenueCat', color: 'bg-[#F15A24]' },
 ];
+
+const PROVIDER_ID_MAP = {
+  Stripe: 'stripe',
+  LemonSqueezy: 'lemonsqueezy',
+  Polar: 'polar',
+  Dodo: 'dodo',
+  RevenueCat: 'revenuecat',
+} as const;
 
 const CATEGORIES = [
   "Ai", "Analytics", "Community", "Content Creation", "Crypto", 
@@ -47,16 +63,26 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [providerApiKey, setProviderApiKey] = useState('');
+  const [dodoStoreId, setDodoStoreId] = useState('');
+  const [revenueCatProjectId, setRevenueCatProjectId] = useState('');
   const [iconUploadError, setIconUploadError] = useState<string | null>(null);
+  const [deckPreviewError, setDeckPreviewError] = useState<string | null>(null);
+  const [deckPreviewStatus, setDeckPreviewStatus] = useState<string | null>(null);
+  const [deckPreviewData, setDeckPreviewData] = useState<MarketplacePitchDecks | null>(null);
+  const [deckPreviewOpen, setDeckPreviewOpen] = useState(false);
+  const [deckPreviewLoading, setDeckPreviewLoading] = useState(false);
+  const [deckPreviewAssetId, setDeckPreviewAssetId] = useState<string | null>(null);
 
   // Form State
-  const [formData, setFormData] = useState({
-    name: '',
-    pitch: '',
-    category: 'Ai',
+const [formData, setFormData] = useState({
+  name: '',
+  pitch: '',
+  category: 'Ai',
     icon: '✨',
     monthlyRevenue: 0,
+    monthlyOperatingExpenses: 0,
     activeUsers: 0,
+    analyticsProofUrl: '',
     founderName: defaultFounderName,
     founderEmail: defaultFounderEmail,
     website: '',
@@ -66,10 +92,32 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
     pricing: '',
     publishToMarketplace: false,
     marketplaceAskingPrice: '',
-    marketplaceProfitMargin: 70,
     marketplaceVisibility: 'public' as 'public' | 'members_only' | 'private',
-    marketplaceIsAnonymous: false,
+  marketplaceIsAnonymous: false,
+  includePitchDeck: false,
+});
+
+useEffect(() => {
+  if (!defaultFounderName && !defaultFounderEmail) return;
+
+  setFormData((prev) => {
+    const nextFounderName = prev.founderName?.trim() ? prev.founderName : (defaultFounderName ?? '');
+    const nextFounderEmail = prev.founderEmail?.trim() ? prev.founderEmail : (defaultFounderEmail ?? '');
+
+    if (
+      nextFounderName === prev.founderName
+      && nextFounderEmail === prev.founderEmail
+    ) {
+      return prev;
+    }
+
+    return {
+      ...prev,
+      founderName: nextFounderName,
+      founderEmail: nextFounderEmail,
+    };
   });
+}, [defaultFounderName, defaultFounderEmail]);
 
   const founderEmailValid =
     !formData.founderEmail.trim()
@@ -77,7 +125,13 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
       : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.founderEmail.trim());
 
   const marketplaceReady = !formData.publishToMarketplace
-    || (founderEmailValid && (formData.marketplaceAskingPrice.trim().length > 0 || formData.monthlyRevenue > 0));
+    || (founderEmailValid && formData.marketplaceAskingPrice.trim().length > 0);
+
+  const providerStepReady =
+    Boolean(selectedProvider)
+    && providerApiKey.trim().length > 0
+    && (selectedProvider !== 'Dodo' || dodoStoreId.trim().length > 0)
+    && (selectedProvider !== 'RevenueCat' || revenueCatProjectId.trim().length > 0);
 
   const isImageIconSource = (value: string): boolean => {
     const normalized = String(value ?? '').trim().toLowerCase();
@@ -129,13 +183,162 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
   const nextStep = () => setStep(s => s + 1);
   const prevStep = () => setStep(s => s - 1);
 
+  useEffect(() => {
+    if (!deckPreviewLoading) {
+      setDeckPreviewStatus(null);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const updateStatus = () => {
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      let label = 'Analyzing VibeJam Financials...';
+
+      if (elapsedSeconds >= 15) {
+        label = 'Finalizing PDF...';
+      } else if (elapsedSeconds >= 8) {
+        label = 'Nano Banana 2 rendering slide visuals...';
+      } else if (elapsedSeconds >= 3) {
+        label = 'Gemini 3 Pro drafting M&A narrative...';
+      }
+
+      setDeckPreviewStatus(`${elapsedSeconds}s · ${label}`);
+    };
+
+    updateStatus();
+    const timer = window.setInterval(updateStatus, 800);
+    return () => window.clearInterval(timer);
+  }, [deckPreviewLoading]);
+
+  const ensureMarketplaceDraftForPreview = async (): Promise<string> => {
+    if (deckPreviewAssetId) {
+      return deckPreviewAssetId;
+    }
+
+    const projectName = formData.name.trim() || 'Untitled Jam';
+    const tagline = formData.pitch.trim() || `${projectName} is now open for acquisition.`;
+    const techStackArray = formData.techStack
+      ? formData.techStack.split(',').map((item) => item.trim()).filter(Boolean)
+      : [];
+
+    const draft = await createMarketplaceAssetDraft({
+      name: projectName,
+      tagline,
+      description: tagline,
+      logoUrl: isImageIconSource(formData.icon) ? formData.icon : undefined,
+      websiteUrl: formData.website.trim() || undefined,
+      category: formData.category,
+      founderName: formData.founderName.trim() || 'Founder',
+      founderEmail: formData.founderEmail.trim(),
+      isAnonymous: formData.marketplaceIsAnonymous,
+      visibility: formData.marketplaceVisibility,
+      techStack: techStackArray,
+    });
+
+    const asset = draft.asset as { id?: string };
+    if (!asset?.id) {
+      throw new Error('Unable to initialize marketplace draft for deck preview.');
+    }
+
+    setDeckPreviewAssetId(asset.id);
+    return asset.id;
+  };
+
+  const syncMarketplaceDraftForPreview = async (assetId: string): Promise<void> => {
+    const projectName = formData.name.trim() || 'Untitled Jam';
+    const tagline = formData.pitch.trim() || `${projectName} is now open for acquisition.`;
+    const techStackArray = formData.techStack
+      ? formData.techStack.split(',').map((item) => item.trim()).filter(Boolean)
+      : [];
+    const safeMonthlyRevenue = Math.max(0, Number(formData.monthlyRevenue || 0));
+    const safeOperatingExpenses = Math.max(0, Number(formData.monthlyOperatingExpenses || 0));
+    const netProfitUsd = Math.max(0, safeMonthlyRevenue - safeOperatingExpenses);
+    const computedProfitMargin = safeMonthlyRevenue > 0
+      ? Math.max(0, Math.min(100, Number(((netProfitUsd / safeMonthlyRevenue) * 100).toFixed(2))))
+      : 0;
+
+    await updateMarketplaceAsset(assetId, {
+      name: projectName,
+      tagline,
+      description: tagline,
+      websiteUrl: formData.website.trim() || undefined,
+      category: formData.category,
+      techStack: techStackArray,
+      founderName: formData.founderName.trim() || 'Founder',
+      founderEmail: formData.founderEmail.trim(),
+      askingPriceUsd: formData.marketplaceAskingPrice.trim() || undefined,
+      profitMarginPercent: computedProfitMargin,
+      isAnonymous: formData.marketplaceIsAnonymous,
+      visibility: formData.marketplaceVisibility,
+    });
+
+    await updateMarketplaceAssetFinancials(assetId, {
+      operatingExpenses: safeOperatingExpenses,
+      expenseBreakdown: '',
+    });
+
+    const normalizedAnalyticsProofUrl = formData.analyticsProofUrl.trim();
+    const normalizedActiveUsers = Math.max(0, Number(formData.activeUsers || 0));
+    if (normalizedActiveUsers > 0 || normalizedAnalyticsProofUrl.length > 0) {
+      await updateMarketplaceAssetTraffic(assetId, {
+        monthlyUniqueVisitors: normalizedActiveUsers,
+        analyticsProofUrl: normalizedAnalyticsProofUrl || undefined,
+      });
+    }
+  };
+
+  const handlePreviewPitchDeck = async () => {
+    if (deckPreviewLoading || isSubmitting) {
+      return;
+    }
+
+    if (!formData.publishToMarketplace) {
+      setDeckPreviewError('Enable marketplace publish to generate a deck preview.');
+      return;
+    }
+
+    if (!founderEmailValid) {
+      setDeckPreviewError('Enter a valid founder email before generating your deck preview.');
+      return;
+    }
+
+    if (!formData.marketplaceAskingPrice.trim()) {
+      setDeckPreviewError('Add an asking price before generating your deck preview.');
+      return;
+    }
+
+    setDeckPreviewError(null);
+    setDeckPreviewLoading(true);
+    try {
+      const assetId = await ensureMarketplaceDraftForPreview();
+      await syncMarketplaceDraftForPreview(assetId);
+      const deckResult = await generateMarketplaceAssetDeck(assetId, { forceRegenerate: true });
+      setDeckPreviewData(deckResult.pitchDecks);
+      setFormData((prev) => ({ ...prev, includePitchDeck: true }));
+      setDeckPreviewOpen(true);
+    } catch (error) {
+      setDeckPreviewError(error instanceof Error ? error.message : 'Unable to generate pitch deck preview right now.');
+    } finally {
+      setDeckPreviewLoading(false);
+    }
+  };
+
   const handlePublish = async () => {
     if (isSubmitting) {
       return;
     }
 
     const shouldPublishMarketplace = formData.publishToMarketplace;
-    const derivedAskingPrice = formData.marketplaceAskingPrice.trim() || String(Math.max(5000, formData.monthlyRevenue * 48));
+    const safeMonthlyRevenue = Math.max(0, Number(formData.monthlyRevenue || 0));
+    const safeOperatingExpenses = Math.max(0, Number(formData.monthlyOperatingExpenses || 0));
+    const netProfitUsd = Math.max(0, safeMonthlyRevenue - safeOperatingExpenses);
+    const computedProfitMargin = safeMonthlyRevenue > 0
+      ? Math.max(0, Math.min(100, Number(((netProfitUsd / safeMonthlyRevenue) * 100).toFixed(2))))
+      : 0;
+    const derivedAskingPrice = formData.marketplaceAskingPrice.trim() || String(Math.max(5000, Math.round(safeMonthlyRevenue * 48)));
+    const previewDeckCoverImageUrl = formData.includePitchDeck
+      ? (deckPreviewData?.slides.find((slide) => Boolean(slide.imageUrl))?.imageUrl ?? null)
+      : null;
 
     const newApp: VibeApp = {
       id: Math.random().toString(36).substr(2, 9),
@@ -144,8 +347,8 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
       pitch: formData.pitch || 'A new vibe-coded masterpiece.',
       icon: formData.icon.trim() || '✨',
       accentColor: '124, 58, 237',
-      monthlyRevenue: formData.monthlyRevenue,
-      lifetimeRevenue: formData.monthlyRevenue * 12, // Simple mock
+      monthlyRevenue: safeMonthlyRevenue,
+      lifetimeRevenue: safeMonthlyRevenue * 12, // Simple mock
       activeUsers: formData.activeUsers,
       buildStreak: 1,
       growth: 0,
@@ -163,11 +366,11 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
       solution: formData.solution || 'Streamlined experience.',
       pricing: formData.pricing || 'Freemium',
       revenueHistory: [
-        { date: 'Month 1', revenue: formData.monthlyRevenue }
+        { date: 'Month 1', revenue: safeMonthlyRevenue }
       ],
       isForSale: shouldPublishMarketplace,
       askingPrice: shouldPublishMarketplace ? `$${derivedAskingPrice}` : undefined,
-      profitMargin: shouldPublishMarketplace ? formData.marketplaceProfitMargin : undefined,
+      profitMargin: shouldPublishMarketplace ? computedProfitMargin : undefined,
       isAnonymous: shouldPublishMarketplace ? formData.marketplaceIsAnonymous : undefined,
       boostTier: shouldPublishMarketplace ? 'Free' : undefined,
       publishSource: 'start-jam',
@@ -175,7 +378,32 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
       marketplaceAskingPriceUsd: shouldPublishMarketplace ? derivedAskingPrice : undefined,
       marketplaceVisibility: shouldPublishMarketplace ? formData.marketplaceVisibility : undefined,
       marketplaceBoostTierId: shouldPublishMarketplace ? 'free' : undefined,
+      includePitchDeck: shouldPublishMarketplace ? formData.includePitchDeck : false,
+      pitchDecks:
+        shouldPublishMarketplace && formData.includePitchDeck
+          ? deckPreviewData ?? undefined
+          : undefined,
+      pitchDeckCoverImageUrl:
+        shouldPublishMarketplace && formData.includePitchDeck
+          ? previewDeckCoverImageUrl
+          : undefined,
+      marketplaceDraftAssetId:
+        shouldPublishMarketplace
+          ? deckPreviewAssetId ?? undefined
+          : undefined,
       websiteUrl: formData.website.trim() || undefined,
+      netProfitCents: Math.round(netProfitUsd * 100),
+      monthlyUniqueVisitors: Math.max(0, Number(formData.activeUsers || 0)),
+      analyticsProofUrl: formData.analyticsProofUrl.trim() || undefined,
+      monthlyOperatingExpensesUsd: safeOperatingExpenses,
+      verificationProvider: selectedProvider ? PROVIDER_ID_MAP[selectedProvider] : undefined,
+      verificationApiKey: providerApiKey.trim() || undefined,
+      verificationProviderAccountId:
+        selectedProvider === 'Dodo'
+          ? dodoStoreId.trim() || undefined
+          : selectedProvider === 'RevenueCat'
+            ? revenueCatProjectId.trim() || undefined
+            : undefined,
     };
 
     setIsSubmitting(true);
@@ -437,7 +665,8 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
                             <p>1. Open Dodo Dashboard -&gt; Developer/API Keys.</p>
                             <p>2. Create a dedicated VibeJam metrics key.</p>
                             <p>3. Prefer read-only scopes when available.</p>
-                            <p>4. Paste key below for a read-only ping test.</p>
+                            <p>4. Find your Store ID in Dodo Dashboard settings.</p>
+                            <p>5. Paste Store ID and key below for a read-only ping test.</p>
                           </>
                         }
                       />
@@ -452,14 +681,39 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
                             <p><strong>Connect RevenueCat</strong></p>
                             <p>1. Go to RevenueCat Project Settings -&gt; API Keys.</p>
                             <p>2. Create a Secret Key (starts with <span className="font-mono">sk_</span>).</p>
-                            <p>3. RevenueCat does not directly move payout funds, so this key is used for subscription insights.</p>
-                            <p>4. Paste key below to verify.</p>
+                            <p>3. Copy your Project ID from the same RevenueCat project.</p>
+                            <p>4. RevenueCat does not directly move payout funds, so this key is used for subscription insights.</p>
+                            <p>5. Paste Project ID and key below to verify.</p>
                           </>
                         }
                       />
                     )}
 
                     <div className="space-y-2">
+                       {selectedProvider === 'Dodo' && (
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Dodo Store ID</label>
+                          <input
+                            type="text"
+                            placeholder="e.g., store_abc123"
+                            value={dodoStoreId}
+                            onChange={(e) => setDodoStoreId(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white font-mono-data"
+                          />
+                        </div>
+                       )}
+                       {selectedProvider === 'RevenueCat' && (
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">RevenueCat Project ID</label>
+                          <input
+                            type="text"
+                            placeholder="e.g., proj_abc123"
+                            value={revenueCatProjectId}
+                            onChange={(e) => setRevenueCatProjectId(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white font-mono-data"
+                          />
+                        </div>
+                       )}
                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Paste API Key Here</label>
                        <input 
                         type="password" 
@@ -483,6 +737,12 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
                        <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest mt-2 flex items-center gap-1">
                           <ShieldCheck className="w-3 h-3" /> VibeJam validates keys via read-only GET ping tests before encrypted storage.
                        </p>
+                       {selectedProvider === 'Dodo' && !dodoStoreId.trim() && (
+                        <p className="text-[10px] text-red-300">Dodo Store ID is required before you continue.</p>
+                       )}
+                       {selectedProvider === 'RevenueCat' && !revenueCatProjectId.trim() && (
+                        <p className="text-[10px] text-red-300">RevenueCat Project ID is required before you continue.</p>
+                       )}
                     </div>
                   </div>
                 )}
@@ -503,11 +763,36 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
                     <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Monthly Revenue (USD)</label>
                     <div className="relative">
                       <input 
-                        type="number" 
+                        type="text"
+                        placeholder="[Fetched automatically via API]"
+                        value={
+                          formData.monthlyRevenue > 0
+                            ? `$${formData.monthlyRevenue.toLocaleString()}`
+                            : '[Fetched automatically via API]'
+                        }
+                        readOnly
+                        disabled
+                        className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3 text-zinc-400 pl-10 cursor-not-allowed"
+                      />
+                      <DollarSign className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                    </div>
+                    <p className="text-[10px] text-zinc-600">Fetched automatically via API.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Monthly Operating Expenses (USD)</label>
+                    <p className="text-[10px] text-zinc-600">(AWS, Marketing, APIs. We use this to calculate your Profit Margin).</p>
+                    <div className="relative">
+                      <input
+                        type="number"
                         min={0}
                         placeholder="0"
-                        value={formData.monthlyRevenue}
-                        onChange={(e) => setFormData({...formData, monthlyRevenue: Math.max(0, parseInt(e.target.value, 10) || 0)})}
+                        value={formData.monthlyOperatingExpenses}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            monthlyOperatingExpenses: Math.max(0, parseInt(e.target.value, 10) || 0),
+                          })
+                        }
                         className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white pl-10"
                       />
                       <DollarSign className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
@@ -524,6 +809,19 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
                         className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white pl-10"
                       />
                       <Users className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Analytics Proof URL (Optional)</label>
+                    <div className="relative">
+                      <input
+                        type="url"
+                        placeholder="e.g., Public Plausible link or Loom video URL."
+                        value={formData.analyticsProofUrl}
+                        onChange={(e) => setFormData({ ...formData, analyticsProofUrl: e.target.value })}
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white pl-10"
+                      />
+                      <Globe className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -653,68 +951,156 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
                     </button>
                   </div>
 
-                  {formData.publishToMarketplace && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Asking Price (USD)</label>
-                        <input
-                          type="number"
-                          min={0}
-                          placeholder={String(Math.max(5000, formData.monthlyRevenue * 48))}
-                          value={formData.marketplaceAskingPrice}
-                          onChange={(e) => setFormData((prev) => ({ ...prev, marketplaceAskingPrice: e.target.value }))}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Profit Margin (%)</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={formData.marketplaceProfitMargin}
-                          onChange={(e) => setFormData((prev) => ({ ...prev, marketplaceProfitMargin: Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0)) }))}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Visibility</label>
-                        <select
-                          value={formData.marketplaceVisibility}
-                          onChange={(e) =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              marketplaceVisibility: e.target.value as 'public' | 'members_only' | 'private',
-                            }))
-                          }
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
-                        >
-                          <option value="public">Public</option>
-                          <option value="members_only">Members Only</option>
-                          <option value="private">Private</option>
-                        </select>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Seller Identity</label>
-                        <button
-                          type="button"
-                          onClick={() => setFormData((prev) => ({ ...prev, marketplaceIsAnonymous: !prev.marketplaceIsAnonymous }))}
-                          className="w-full h-[50px] rounded-xl bg-white/5 border border-white/10 px-4 text-left flex items-center justify-between"
-                        >
-                          <span className="text-sm text-white">{formData.marketplaceIsAnonymous ? 'Anonymous Listing' : 'Public Founder Profile'}</span>
-                          <span className={`w-10 h-5 rounded-full relative transition-all ${formData.marketplaceIsAnonymous ? 'bg-[#D4AF37]' : 'bg-white/15'}`}>
-                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${formData.marketplaceIsAnonymous ? 'left-5' : 'left-0.5'}`} />
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  <AnimatePresence initial={false}>
+                    {formData.publishToMarketplace && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                        className="space-y-4"
+                      >
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                            Asking Price (USD) <span className="text-red-400">Required</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            required={formData.publishToMarketplace}
+                            placeholder={String(Math.max(5000, formData.monthlyRevenue * 48))}
+                            value={formData.marketplaceAskingPrice}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, marketplaceAskingPrice: e.target.value }))}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-white/30"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                            Founder Email <span className="text-red-400">Required</span>
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="email"
+                              required
+                              placeholder="name@company.com"
+                              value={formData.founderEmail}
+                              onChange={(e) => setFormData((prev) => ({ ...prev, founderEmail: e.target.value }))}
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 pl-10 text-white focus:outline-none focus:border-white/30"
+                            />
+                            <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                          </div>
+                          {!founderEmailValid && (
+                            <p className="text-[11px] text-red-300">
+                              Enter a valid founder email to publish this jam on Marketplace.
+                            </p>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Visibility</label>
+                            <select
+                              value={formData.marketplaceVisibility}
+                              onChange={(e) =>
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  marketplaceVisibility: e.target.value as 'public' | 'members_only' | 'private',
+                                }))
+                              }
+                              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white"
+                            >
+                              <option value="public">Public</option>
+                              <option value="members_only">Members Only</option>
+                              <option value="private">Private</option>
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Seller Identity</label>
+                            <button
+                              type="button"
+                              onClick={() => setFormData((prev) => ({ ...prev, marketplaceIsAnonymous: !prev.marketplaceIsAnonymous }))}
+                              className="w-full h-[50px] rounded-xl bg-white/5 border border-white/10 px-4 text-left flex items-center justify-between"
+                            >
+                              <span className="text-sm text-white">{formData.marketplaceIsAnonymous ? 'Anonymous Listing' : 'Public Founder Profile'}</span>
+                              <span className={`w-10 h-5 rounded-full relative transition-all ${formData.marketplaceIsAnonymous ? 'bg-[#D4AF37]' : 'bg-white/15'}`}>
+                                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${formData.marketplaceIsAnonymous ? 'left-5' : 'left-0.5'}`} />
+                              </span>
+                            </button>
+                          </div>
+                        </div>
 
-                  {formData.publishToMarketplace && !founderEmailValid && (
-                    <p className="text-[11px] text-red-300">
-                      Founder email is required to publish to Marketplace.
-                    </p>
-                  )}
+                        <motion.div
+                          initial={{ opacity: 0, y: -6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -6 }}
+                          transition={{ duration: 0.2, ease: 'easeOut' }}
+                          className="relative overflow-hidden rounded-xl border border-white/10 bg-gradient-to-br from-white/5 to-transparent p-4 mt-4"
+                        >
+                          <motion.div
+                            aria-hidden
+                            className="pointer-events-none absolute -right-10 -top-14 h-44 w-44 rounded-full bg-gradient-to-br from-fuchsia-500/25 via-violet-500/15 to-cyan-400/20 blur-3xl"
+                            animate={{ opacity: [0.45, 0.8, 0.45], scale: [1, 1.08, 1] }}
+                            transition={{ duration: 4.6, repeat: Infinity, ease: 'easeInOut' }}
+                          />
+                          <div className="relative z-10 flex items-start justify-between gap-4">
+                            <div>
+                              <h5 className="text-sm font-black tracking-tight text-white flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 text-fuchsia-300" />
+                                ✨ AI Pitch Deck Generator
+                              </h5>
+                              <p className="mt-2 text-xs leading-relaxed text-zinc-300 max-w-xl">
+                                Let our AI Investment Banker instantly generate a 6-slide presentation deck
+                                using your verified metrics, ready to send to buyers.
+                              </p>
+                            </div>
+                            <div className="shrink-0 flex flex-col items-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (deckPreviewData) {
+                                    setDeckPreviewOpen(true);
+                                    return;
+                                  }
+                                  void handlePreviewPitchDeck();
+                                }}
+                                disabled={deckPreviewLoading}
+                                className={`inline-flex h-8 items-center rounded-full border px-3 text-[10px] font-black uppercase tracking-widest transition-all ${
+                                  deckPreviewData
+                                    ? 'border-cyan-400/45 bg-cyan-500/20 text-cyan-100'
+                                    : 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fuchsia-100'
+                                } ${deckPreviewLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
+                              >
+                                {deckPreviewLoading
+                                  ? 'Generating...'
+                                  : deckPreviewData
+                                    ? 'View Deck Preview'
+                                    : 'Generate Deck Preview'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setFormData((prev) => ({ ...prev, includePitchDeck: !prev.includePitchDeck }))
+                                }
+                                className={`inline-flex h-7 items-center rounded-full border px-3 text-[9px] font-black uppercase tracking-widest transition-all ${
+                                  formData.includePitchDeck
+                                    ? 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fuchsia-100'
+                                    : 'border-white/15 bg-black/20 text-zinc-300 hover:border-white/30'
+                                }`}
+                              >
+                                {formData.includePitchDeck ? 'Included on Publish' : 'Skip on Publish'}
+                              </button>
+                            </div>
+                          </div>
+                          {deckPreviewError && (
+                            <p className="relative z-10 mt-3 text-[11px] text-red-300">{deckPreviewError}</p>
+                          )}
+                          {!deckPreviewError && deckPreviewStatus && (
+                            <p className="relative z-10 mt-3 text-[11px] text-cyan-200">{deckPreviewStatus}</p>
+                          )}
+                        </motion.div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                 </div>
               </motion.div>
             )}
@@ -733,9 +1119,21 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
           
           <button 
             onClick={step === 4 ? handlePublish : nextStep}
-            disabled={isSubmitting || (step === 1 && !formData.name) || (step === 4 && !marketplaceReady)}
+            disabled={
+              isSubmitting
+              || (step === 1 && !formData.name)
+              || (step === 2 && !providerStepReady)
+              || (step === 4 && !marketplaceReady)
+            }
             className={`px-8 py-2.5 rounded-full font-black uppercase tracking-widest text-xs flex items-center gap-2 transition-all
-              ${isSubmitting || (step === 1 && !formData.name) || (step === 4 && !marketplaceReady) ? 'bg-white/5 text-zinc-700 cursor-not-allowed' : 'bg-white text-black hover:scale-105 shadow-xl shadow-white/5'}`}
+              ${
+                isSubmitting
+                || (step === 1 && !formData.name)
+                || (step === 2 && !providerStepReady)
+                || (step === 4 && !marketplaceReady)
+                  ? 'bg-white/5 text-zinc-700 cursor-not-allowed'
+                  : 'bg-white text-black hover:scale-105 shadow-xl shadow-white/5'
+              }`}
           >
             {step === 4 ? (
               isSubmitting ? <>Publishing...</> : <>Publish Jam <Rocket className="w-3.5 h-3.5" /></>
@@ -744,6 +1142,16 @@ const StartJamModal: React.FC<StartJamModalProps> = ({
             )}
           </button>
         </footer>
+
+        <AnimatePresence>
+          {deckPreviewOpen && deckPreviewData && (
+            <DeckViewer
+              assetName={formData.name || 'Untitled Jam'}
+              decks={deckPreviewData}
+              onClose={() => setDeckPreviewOpen(false)}
+            />
+          )}
+        </AnimatePresence>
       </motion.div>
     </motion.div>
   );

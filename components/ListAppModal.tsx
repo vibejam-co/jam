@@ -15,13 +15,19 @@ import {
   CheckCircle2,
   HelpCircle,
   AlertTriangle,
+  Sparkles,
 } from 'lucide-react';
-import { VibeApp } from '../types';
+import { MarketplacePitchDecks, VibeApp } from '../types';
 import {
   connectMarketplaceAsset,
   createMarketplaceAssetDraft,
+  updateMarketplaceAsset,
+  generateMarketplaceAssetDeck,
   publishMarketplaceAsset,
+  updateMarketplaceAssetFinancials,
+  updateMarketplaceAssetTraffic,
 } from '../lib/api';
+import DeckViewer from './DeckViewer';
 
 interface ListAppModalProps {
   onClose: () => void;
@@ -62,6 +68,39 @@ const BOOST_TIERS_RESTORE_WORD = 'AURORA_RESTORE';
 const hasPaidBoostsUnlocked = () =>
   String(import.meta.env.VITE_MARKETPLACE_BOOSTS_UNLOCK_WORD ?? '').trim() === BOOST_TIERS_RESTORE_WORD;
 
+const CATEGORY_OPTIONS = [
+  'Ai',
+  'Analytics',
+  'Community',
+  'Content Creation',
+  'Crypto',
+  'Customer Support',
+  'Design Tools',
+  'Developer Tools',
+  'Ecommerce',
+  'Education',
+  'Entertainment',
+  'Fintech',
+  'Games',
+  'Health',
+  'IoT',
+  'Legal',
+  'Marketing',
+  'Marketplace',
+  'Mobile Apps',
+  'News & Magazines',
+  'No-Code',
+  'Productivity',
+  'Real Estate',
+  'Recruiting & HR',
+  'SaaS',
+  'Sales',
+  'Security',
+  'Social Media',
+  'Travel',
+  'Utilities',
+] as const;
+
 type PendingBoostCheckout = {
   tier: 'free' | 'pro' | 'elite';
   sessionId: string;
@@ -79,14 +118,22 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [draftAssetId, setDraftAssetId] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
+  const [dodoStoreId, setDodoStoreId] = useState('');
+  const [revenueCatProjectId, setRevenueCatProjectId] = useState('');
   const [iconUploadError, setIconUploadError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingBoostCheckout, setPendingBoostCheckout] = useState<PendingBoostCheckout | null>(null);
+  const [deckPreviewLoading, setDeckPreviewLoading] = useState(false);
+  const [deckPreviewStatus, setDeckPreviewStatus] = useState<string | null>(null);
+  const [deckPreviewError, setDeckPreviewError] = useState<string | null>(null);
+  const [deckPreviewData, setDeckPreviewData] = useState<MarketplacePitchDecks | null>(null);
+  const [deckViewerOpen, setDeckViewerOpen] = useState(false);
   const iconFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
+    website: '',
     pitch: '',
     category: 'SaaS' as string,
     icon: '💎',
@@ -95,6 +142,10 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
     founderEmail: '',
     askingPrice: '',
     profitMargin: 80,
+    monthlyOperatingExpenses: 0,
+    activeUsers: 0,
+    analyticsProofUrl: '',
+    includePitchDeck: false,
     isAnonymous: false,
     techStack: '',
   });
@@ -116,6 +167,33 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       setPendingBoostCheckout(null);
     }
   }, [paidBoostsEnabled, selectedTier]);
+
+  useEffect(() => {
+    if (!deckPreviewLoading) {
+      setDeckPreviewStatus(null);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const updateStatus = () => {
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      let label = 'Analyzing VibeJam Financials...';
+
+      if (elapsedSeconds >= 15) {
+        label = 'Finalizing PDF...';
+      } else if (elapsedSeconds >= 8) {
+        label = 'Nano Banana 2 rendering slide visuals...';
+      } else if (elapsedSeconds >= 3) {
+        label = 'Gemini 3 Pro drafting M&A narrative...';
+      }
+
+      setDeckPreviewStatus(`${elapsedSeconds}s · ${label}`);
+    };
+
+    updateStatus();
+    const timer = window.setInterval(updateStatus, 800);
+    return () => window.clearInterval(timer);
+  }, [deckPreviewLoading]);
 
   const nextStep = () => {
     resetMessages();
@@ -141,6 +219,7 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       tagline: formData.pitch || `${formData.name} is now open for acquisition.`,
       description: formData.pitch || `${formData.name} is now open for acquisition.`,
       logoUrl: formData.logoUrl.trim(),
+      websiteUrl: formData.website.trim() || undefined,
       category: formData.category,
       founderName: formData.founderName,
       founderEmail: formData.founderEmail,
@@ -151,6 +230,66 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
     const asset = response.asset as { id: string };
     setDraftAssetId(asset.id);
     return asset.id;
+  };
+
+  const syncDraftForDeckPreview = async (assetId: string): Promise<void> => {
+    const techStackArray = formData.techStack
+      ? formData.techStack.split(',').map((item) => item.trim()).filter(Boolean)
+      : [];
+    const normalizedOperatingExpenses = Math.max(0, Number(formData.monthlyOperatingExpenses || 0));
+    const normalizedActiveUsers = Math.max(0, Number(formData.activeUsers || 0));
+    const normalizedAnalyticsProofUrl = formData.analyticsProofUrl.trim();
+
+    await updateMarketplaceAsset(assetId, {
+      name: formData.name,
+      tagline: formData.pitch || `${formData.name} is now open for acquisition.`,
+      description: formData.pitch || `${formData.name} is now open for acquisition.`,
+      websiteUrl: formData.website.trim() || undefined,
+      category: formData.category,
+      techStack: techStackArray,
+      founderName: formData.founderName,
+      founderEmail: formData.founderEmail,
+      askingPriceUsd: formData.askingPrice.trim() || undefined,
+      profitMarginPercent: Number.isFinite(formData.profitMargin) ? formData.profitMargin : null,
+      isAnonymous: formData.isAnonymous,
+      visibility: 'public',
+    });
+
+    await updateMarketplaceAssetFinancials(assetId, {
+      operatingExpenses: normalizedOperatingExpenses,
+      expenseBreakdown: '',
+    });
+
+    if (normalizedActiveUsers > 0 || normalizedAnalyticsProofUrl.length > 0) {
+      await updateMarketplaceAssetTraffic(assetId, {
+        monthlyUniqueVisitors: normalizedActiveUsers,
+        analyticsProofUrl: normalizedAnalyticsProofUrl || undefined,
+      });
+    }
+  };
+
+  const handlePreviewPitchDeck = async () => {
+    if (deckPreviewLoading || isSubmitting) {
+      return;
+    }
+
+    setDeckPreviewError(null);
+    resetMessages();
+    setDeckPreviewLoading(true);
+
+    try {
+      const assetId = await ensureDraft();
+      await syncDraftForDeckPreview(assetId);
+      const deckResult = await generateMarketplaceAssetDeck(assetId, { forceRegenerate: true });
+      setDeckPreviewData(deckResult.pitchDecks);
+      setFormData((prev) => ({ ...prev, includePitchDeck: true }));
+      setStatusMessage('AI pitch deck preview is ready.');
+      setDeckViewerOpen(true);
+    } catch (error) {
+      setDeckPreviewError(error instanceof Error ? error.message : 'Unable to generate pitch deck preview right now.');
+    } finally {
+      setDeckPreviewLoading(false);
+    }
   };
 
   const handleConnectProvider = async () => {
@@ -167,6 +306,14 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       setErrorMessage('Enter your read-only API key to continue.');
       return;
     }
+    if (selectedProvider === 'Dodo' && !dodoStoreId.trim()) {
+      setErrorMessage('Enter your Dodo Store ID to continue.');
+      return;
+    }
+    if (selectedProvider === 'RevenueCat' && !revenueCatProjectId.trim()) {
+      setErrorMessage('Enter your RevenueCat Project ID to continue.');
+      return;
+    }
 
     setIsSubmitting(true);
     resetMessages();
@@ -174,9 +321,16 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
     try {
       const assetId = await ensureDraft();
       const provider = PROVIDER_ID_MAP[selectedProvider];
+      const providerAccountId =
+        selectedProvider === 'Dodo'
+          ? dodoStoreId.trim()
+          : selectedProvider === 'RevenueCat'
+            ? revenueCatProjectId.trim()
+            : undefined;
       const result = await connectMarketplaceAsset(assetId, {
         provider,
         apiKey: apiKey.trim(),
+        providerAccountId,
         isAnonymous: formData.isAnonymous,
       });
 
@@ -213,6 +367,9 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
 
     try {
       const assetId = await ensureDraft();
+      const normalizedOperatingExpenses = Math.max(0, Number(formData.monthlyOperatingExpenses || 0));
+      const normalizedActiveUsers = Math.max(0, Number(formData.activeUsers || 0));
+      const normalizedAnalyticsProofUrl = formData.analyticsProofUrl.trim();
 
       const selectedTierId = paidBoostsEnabled ? TIER_ID_MAP[selectedTier] : 'free';
       const publishResult = await publishMarketplaceAsset(assetId, {
@@ -247,6 +404,44 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       }
 
       setPendingBoostCheckout(null);
+      const normalizedMrrUsd = Math.max(0, Math.round(publishResult.mrrCents / 100));
+      const normalizedNetProfitUsd = Math.max(0, normalizedMrrUsd - normalizedOperatingExpenses);
+      const derivedProfitMargin = normalizedMrrUsd > 0
+        ? Math.max(0, Math.min(100, Number(((normalizedNetProfitUsd / normalizedMrrUsd) * 100).toFixed(2))))
+        : 0;
+      const effectiveProfitMargin = Number.isFinite(formData.profitMargin)
+        ? Math.max(0, Math.min(100, formData.profitMargin))
+        : derivedProfitMargin;
+
+      try {
+        await updateMarketplaceAssetFinancials(assetId, {
+          operatingExpenses: normalizedOperatingExpenses,
+          expenseBreakdown: '',
+        });
+      } catch {
+        // Non-blocking: listing remains live even if optional financial metadata save retries later.
+      }
+
+      if (normalizedActiveUsers > 0 || normalizedAnalyticsProofUrl.length > 0) {
+        try {
+          await updateMarketplaceAssetTraffic(assetId, {
+            monthlyUniqueVisitors: normalizedActiveUsers,
+            analyticsProofUrl: normalizedAnalyticsProofUrl || undefined,
+          });
+        } catch {
+          // Non-blocking: listing remains live even if optional traffic metadata save retries later.
+        }
+      }
+
+      let pitchDeckCoverImageUrl: string | null = null;
+      if (formData.includePitchDeck) {
+        try {
+          const decks = deckPreviewData ?? (await generateMarketplaceAssetDeck(assetId, { forceRegenerate: true })).pitchDecks;
+          pitchDeckCoverImageUrl = decks.slides.find((slide) => Boolean(slide.imageUrl))?.imageUrl ?? null;
+        } catch {
+          // Non-blocking: listing remains live even if AI deck generation retries later.
+        }
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('marketplace:refresh'));
@@ -262,11 +457,12 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
         rank: 'NEW',
         name: formData.isAnonymous ? 'Anonymous Asset' : formData.name,
         pitch: formData.pitch,
+        websiteUrl: formData.website.trim() || undefined,
         icon: formData.isAnonymous ? '🛡️' : (formData.logoUrl.trim() || formData.icon),
         accentColor: '212, 175, 55',
-        monthlyRevenue: Math.max(0, Math.round(publishResult.mrrCents / 100)),
+        monthlyRevenue: normalizedMrrUsd,
         lifetimeRevenue: Math.max(0, Math.round((publishResult.last30dRevenueCents * 12) / 100)),
-        activeUsers: 0,
+        activeUsers: normalizedActiveUsers,
         buildStreak: 0,
         growth: Number((publishResult.last30dGrowthBps / 100).toFixed(2)),
         tags: [formData.category, 'FOR SALE'],
@@ -288,11 +484,17 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
         ],
         isForSale: true,
         askingPrice: `$${formData.askingPrice}`,
-        profitMargin: formData.profitMargin,
+        profitMargin: effectiveProfitMargin,
         isAnonymous: formData.isAnonymous,
         boostTier: selectedTier,
         marketplaceAssetId: assetId,
         isOwnerListing: true,
+        netProfitCents: Math.round(normalizedNetProfitUsd * 100),
+        monthlyOperatingExpensesUsd: normalizedOperatingExpenses,
+        monthlyUniqueVisitors: normalizedActiveUsers,
+        analyticsProofUrl: normalizedAnalyticsProofUrl || undefined,
+        includePitchDeck: formData.includePitchDeck,
+        pitchDeckCoverImageUrl,
       });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to publish listing.');
@@ -439,19 +641,30 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Project Name</label>
-                    <input type="text" placeholder="e.g. Prism OS" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none focus:ring-1 focus:ring-yellow-500/50" />
-                  </div>
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Founder Name</label>
-                    <input type="text" placeholder="Full Name" value={formData.founderName} onChange={(e) => setFormData({ ...formData, founderName: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none" />
-                  </div>
-                </div>
-
                 <div className="space-y-3">
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between">
-                    Founder Private Email <span className="text-yellow-500/50">Required</span>
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Project Name</label>
+                  <input type="text" placeholder="e.g. Prism OS" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none focus:ring-1 focus:ring-yellow-500/50" />
+                </div>
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Founder Name</label>
+                  <input type="text" placeholder="Full Name" value={formData.founderName} onChange={(e) => setFormData({ ...formData, founderName: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none" />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Website URL</label>
+                <input
+                  type="url"
+                  placeholder="https://example.com"
+                  value={formData.website}
+                  onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none focus:ring-1 focus:ring-yellow-500/50"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center justify-between">
+                  Founder Private Email <span className="text-yellow-500/50">Required</span>
                   </label>
                   <div className="relative">
                     <Mail className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-600" />
@@ -461,7 +674,17 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
 
                 <div className="space-y-3">
                   <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Category</label>
-                  <input type="text" placeholder="SaaS" value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white focus:outline-none" />
+                  <select
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white focus:outline-none"
+                  >
+                    {CATEGORY_OPTIONS.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="p-8 rounded-3xl bg-yellow-500/5 border border-yellow-500/10 flex items-start gap-4">
@@ -614,7 +837,8 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                                 <li>Open Dodo Dashboard -&gt; Developer/API Keys.</li>
                                 <li>Create a new key for VibeJam metrics sync.</li>
                                 <li>Prefer read-only permissions whenever available.</li>
-                                <li>Paste the key below to run a permission ping test.</li>
+                                <li>Find your Store ID in Dodo Dashboard settings.</li>
+                                <li>Paste the Store ID and key below to run a permission ping test.</li>
                               </ol>
                             </div>
                           </div>
@@ -634,8 +858,9 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                               <ol className="list-decimal pl-5 space-y-2">
                                 <li>Go to RevenueCat Project Settings -&gt; API Keys.</li>
                                 <li>Create a new Secret Key (starts with <span className="font-mono">sk_</span>).</li>
+                                <li>Copy your Project ID from the same RevenueCat project.</li>
                                 <li>Use read-focused access for subscription analytics.</li>
-                                <li>Paste the key below to verify it.</li>
+                                <li>Paste Project ID and key below to verify access.</li>
                               </ol>
                             </div>
                           </div>
@@ -644,6 +869,36 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                     )}
 
                     <div className="space-y-3">
+                      {selectedProvider === 'Dodo' && (
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                            Dodo Store ID
+                          </label>
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            placeholder="e.g., store_abc123"
+                            value={dodoStoreId}
+                            onChange={(e) => setDodoStoreId(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-5 text-white font-mono-data"
+                          />
+                        </div>
+                      )}
+                      {selectedProvider === 'RevenueCat' && (
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                            RevenueCat Project ID
+                          </label>
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            placeholder="e.g., proj_abc123"
+                            value={revenueCatProjectId}
+                            onChange={(e) => setRevenueCatProjectId(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-5 text-white font-mono-data"
+                          />
+                        </div>
+                      )}
                       <div className="relative flex items-center justify-between">
                         <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
                           {selectedProvider === 'Stripe' ? 'Stripe Connect API Key' : 'Verification Key'}
@@ -726,6 +981,56 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Monthly Operating Expenses (USD)</label>
+                    <p className="text-[10px] text-zinc-600">(AWS, Marketing, APIs. We use this to calculate your Profit Margin).</p>
+                    <div className="relative">
+                      <span className="absolute left-6 top-1/2 -translate-y-1/2 text-zinc-600 font-bold">$</span>
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="0"
+                        value={formData.monthlyOperatingExpenses}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            monthlyOperatingExpenses: Math.max(0, Number.parseInt(e.target.value || '0', 10) || 0),
+                          }))
+                        }
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl px-12 py-5 text-white focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Active Users</label>
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="0"
+                      value={formData.activeUsers}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          activeUsers: Math.max(0, Number.parseInt(e.target.value || '0', 10) || 0),
+                        }))
+                      }
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-5 text-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Analytics Proof URL (Optional)</label>
+                  <input
+                    type="url"
+                    placeholder="e.g., Public Plausible link or Loom video URL."
+                    value={formData.analyticsProofUrl}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, analyticsProofUrl: e.target.value }))}
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white focus:outline-none"
+                  />
+                </div>
+
                 <div className="space-y-3">
                   <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Acquisition Pitch</label>
                   <textarea placeholder="Briefly describe why an investor should buy this asset..." rows={3} value={formData.pitch} onChange={(e) => setFormData({ ...formData, pitch: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-3xl px-6 py-5 text-white focus:outline-none resize-none" />
@@ -778,6 +1083,73 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                     Pro and Elite boosts are temporarily unavailable during the free-listing rollout.
                   </div>
                 )}
+
+                <motion.div
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  className="relative overflow-hidden rounded-xl border border-white/10 bg-gradient-to-br from-white/5 to-transparent p-4 mt-4"
+                >
+                  <motion.div
+                    aria-hidden
+                    className="pointer-events-none absolute -right-10 -top-14 h-44 w-44 rounded-full bg-gradient-to-br from-fuchsia-500/25 via-violet-500/15 to-cyan-400/20 blur-3xl"
+                    animate={{ opacity: [0.45, 0.8, 0.45], scale: [1, 1.08, 1] }}
+                    transition={{ duration: 4.6, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                  <div className="relative z-10 flex items-start justify-between gap-4">
+                    <div>
+                      <h5 className="text-sm font-black tracking-tight text-white flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-fuchsia-300" />
+                        ✨ AI Pitch Deck Generator
+                      </h5>
+                      <p className="mt-2 text-xs leading-relaxed text-zinc-300 max-w-xl">
+                        Let our AI Investment Banker instantly generate a 6-slide presentation deck
+                        using your verified metrics, ready to send to buyers.
+                      </p>
+                    </div>
+                    <div className="shrink-0 flex flex-col items-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (deckPreviewData) {
+                            setDeckViewerOpen(true);
+                            return;
+                          }
+                          void handlePreviewPitchDeck();
+                        }}
+                        disabled={deckPreviewLoading}
+                        className={`inline-flex h-8 items-center rounded-full border px-3 text-[10px] font-black uppercase tracking-widest transition-all ${
+                          deckPreviewData
+                            ? 'border-cyan-400/45 bg-cyan-500/20 text-cyan-100'
+                            : 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fuchsia-100'
+                        } ${deckPreviewLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        {deckPreviewLoading
+                          ? 'Generating...'
+                          : deckPreviewData
+                            ? 'View Deck Preview'
+                            : 'Generate Deck Preview'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData((prev) => ({ ...prev, includePitchDeck: !prev.includePitchDeck }))}
+                        className={`inline-flex h-7 items-center rounded-full border px-3 text-[9px] font-black uppercase tracking-widest transition-all ${
+                          formData.includePitchDeck
+                            ? 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fuchsia-100'
+                            : 'border-white/15 bg-black/20 text-zinc-300 hover:border-white/30'
+                        }`}
+                      >
+                        {formData.includePitchDeck ? 'Included on Publish' : 'Skip on Publish'}
+                      </button>
+                    </div>
+                  </div>
+                  {deckPreviewError && (
+                    <p className="relative z-10 mt-3 text-[11px] text-red-300">{deckPreviewError}</p>
+                  )}
+                  {!deckPreviewError && deckPreviewStatus && (
+                    <p className="relative z-10 mt-3 text-[11px] text-cyan-200">{deckPreviewStatus}</p>
+                  )}
+                </motion.div>
 
                 <div className="p-8 rounded-[32px] bg-black border border-white/5 flex items-center justify-between">
                   <div className="flex items-center gap-4">
@@ -832,14 +1204,24 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
               isSubmitting ||
               (step === 1 && (!formData.founderEmail || !formData.name || !formData.founderName)) ||
               (step === 2 && !selectedProvider) ||
-              (step === 3 && (!selectedProvider || !apiKey.trim())) ||
+              (step === 3 && (
+                !selectedProvider
+                || !apiKey.trim()
+                || (selectedProvider === 'Dodo' && !dodoStoreId.trim())
+                || (selectedProvider === 'RevenueCat' && !revenueCatProjectId.trim())
+              )) ||
               (step === 4 && !formData.askingPrice.trim())
             }
             className={`px-10 py-4 rounded-full font-black uppercase tracking-widest text-xs flex items-center gap-3 transition-all ${
               isSubmitting ||
               (step === 1 && (!formData.founderEmail || !formData.name || !formData.founderName)) ||
               (step === 2 && !selectedProvider) ||
-              (step === 3 && (!selectedProvider || !apiKey.trim())) ||
+              (step === 3 && (
+                !selectedProvider
+                || !apiKey.trim()
+                || (selectedProvider === 'Dodo' && !dodoStoreId.trim())
+                || (selectedProvider === 'RevenueCat' && !revenueCatProjectId.trim())
+              )) ||
               (step === 4 && !formData.askingPrice.trim())
                 ? 'bg-white/5 text-zinc-800 cursor-not-allowed'
                 : 'bg-white text-black hover:scale-105 active:scale-95 shadow-2xl shadow-white/5'
@@ -858,6 +1240,16 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
             )}
           </button>
         </footer>
+
+        <AnimatePresence>
+          {deckViewerOpen && deckPreviewData && (
+            <DeckViewer
+              assetName={formData.name || 'Untitled Asset'}
+              decks={deckPreviewData}
+              onClose={() => setDeckViewerOpen(false)}
+            />
+          )}
+        </AnimatePresence>
       </motion.div>
     </motion.div>
   );

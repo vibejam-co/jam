@@ -990,6 +990,35 @@ export default async function handler(req: any, res: any) {
         };
         const draftUpdateFallbackPayload = {
           jam_id: payload.jamId ?? null,
+          title: payload.name,
+          tagline: payload.tagline,
+          description: payload.description,
+          logo_url: payload.logoUrl || null,
+          category: payload.category,
+          subcategory: payload.subcategory || null,
+          tech_stack: payload.techStack,
+          founder_name: payload.founderName,
+          founder_email: payload.founderEmail,
+          is_anonymous: payload.isAnonymous,
+          visibility: payload.visibility,
+        };
+        const draftUpdateLegacyFallbackPayload = {
+          jam_id: payload.jamId ?? null,
+          title: payload.name,
+          tagline: payload.tagline,
+          description: payload.description,
+          logo_url: payload.logoUrl || null,
+          category: payload.category,
+          subcategory: payload.subcategory || null,
+          tech_stack: payload.techStack,
+          founder_name: payload.founderName,
+          founder_email: payload.founderEmail,
+          is_anonymous: payload.isAnonymous,
+          visibility: payload.visibility,
+        };
+
+        const draftUpdateUltraLegacyFallbackPayload = {
+          jam_id: payload.jamId ?? null,
           tagline: payload.tagline,
           description: payload.description,
           logo_url: payload.logoUrl || null,
@@ -1013,6 +1042,24 @@ export default async function handler(req: any, res: any) {
           draftUpdateResult = await supabase
             .from('marketplace_assets')
             .update(draftUpdateFallbackPayload)
+            .eq('id', existingDraft.id)
+            .select(LEGACY_ASSET_SELECT)
+            .single();
+        }
+
+        if (draftUpdateResult.error && isRecoverableSchemaError(draftUpdateResult.error)) {
+          draftUpdateResult = await supabase
+            .from('marketplace_assets')
+            .update(draftUpdateLegacyFallbackPayload)
+            .eq('id', existingDraft.id)
+            .select(LEGACY_ASSET_SELECT)
+            .single();
+        }
+
+        if (draftUpdateResult.error && isRecoverableSchemaError(draftUpdateResult.error)) {
+          draftUpdateResult = await supabase
+            .from('marketplace_assets')
+            .update(draftUpdateUltraLegacyFallbackPayload)
             .eq('id', existingDraft.id)
             .select(LEGACY_ASSET_SELECT)
             .single();
@@ -1077,6 +1124,46 @@ export default async function handler(req: any, res: any) {
       const insertFallbackPayload = {
         owner_user_id: user.id,
         jam_id: payload.jamId ?? null,
+        title: payload.name,
+        slug,
+        name: payload.name,
+        tagline: payload.tagline,
+        description: payload.description,
+        logo_url: payload.logoUrl || null,
+        category: payload.category,
+        subcategory: payload.subcategory || null,
+        tech_stack: payload.techStack,
+        founder_name: payload.founderName,
+        founder_email: payload.founderEmail,
+        is_anonymous: payload.isAnonymous,
+        visibility: payload.visibility,
+        is_listed: false,
+        verified_status: 'unverified',
+      };
+
+      const insertLegacyFallbackPayload = {
+        owner_user_id: user.id,
+        jam_id: payload.jamId ?? null,
+        title: payload.name,
+        slug,
+        name: payload.name,
+        tagline: payload.tagline,
+        description: payload.description,
+        logo_url: payload.logoUrl || null,
+        category: payload.category,
+        subcategory: payload.subcategory || null,
+        tech_stack: payload.techStack,
+        founder_name: payload.founderName,
+        founder_email: payload.founderEmail,
+        is_anonymous: payload.isAnonymous,
+        visibility: payload.visibility,
+        is_listed: false,
+        verified_status: 'unverified',
+      };
+
+      const insertUltraLegacyFallbackPayload = {
+        owner_user_id: user.id,
+        jam_id: payload.jamId ?? null,
         slug,
         name: payload.name,
         tagline: payload.tagline,
@@ -1103,6 +1190,22 @@ export default async function handler(req: any, res: any) {
         insertResult = await supabase
           .from('marketplace_assets')
           .insert(insertFallbackPayload)
+          .select(LEGACY_ASSET_SELECT)
+          .single();
+      }
+
+      if (insertResult.error && isRecoverableSchemaError(insertResult.error)) {
+        insertResult = await supabase
+          .from('marketplace_assets')
+          .insert(insertLegacyFallbackPayload)
+          .select(LEGACY_ASSET_SELECT)
+          .single();
+      }
+
+      if (insertResult.error && isRecoverableSchemaError(insertResult.error)) {
+        insertResult = await supabase
+          .from('marketplace_assets')
+          .insert(insertUltraLegacyFallbackPayload)
           .select(LEGACY_ASSET_SELECT)
           .single();
       }

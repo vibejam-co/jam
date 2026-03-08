@@ -32,6 +32,7 @@ export const CreateMarketplaceAssetDraftSchema = z.object({
 export const ConnectMarketplaceAssetSchema = z.object({
   provider: ProviderSchema,
   apiKey: z.string().trim().min(8).max(512),
+  providerAccountId: z.string().trim().min(2).max(160).optional(),
   isAnonymous: z.boolean().optional(),
 });
 

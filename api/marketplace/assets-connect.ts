@@ -92,6 +92,22 @@ export default async function handler(req: any, res: any) {
           details: 'Create a RevenueCat Secret Key from Project Settings -> API Keys.',
         });
       }
+      const projectId = String(payload.providerAccountId ?? '').trim();
+      if (!projectId) {
+        return sendJson(res, 400, {
+          error: 'RevenueCat Project ID is required.',
+          details: 'Enter your RevenueCat Project ID and try again.',
+        });
+      }
+    }
+    if (payload.provider === 'dodo') {
+      const storeId = String(payload.providerAccountId ?? '').trim();
+      if (!storeId) {
+        return sendJson(res, 400, {
+          error: 'Dodo Store ID is required.',
+          details: 'Enter your Dodo Store ID (for example: store_abc123) and try again.',
+        });
+      }
     }
 
     const supabase = await getSupabaseAdmin();
@@ -114,7 +130,9 @@ export default async function handler(req: any, res: any) {
     const adapter = getProviderAdapter(payload.provider);
     let validation: Awaited<ReturnType<typeof adapter.validateKey>>;
     try {
-      validation = await adapter.validateKey(payload.apiKey);
+      validation = await adapter.validateKey(payload.apiKey, {
+        providerAccountId: payload.providerAccountId ?? null,
+      });
     } catch (validationError) {
       const details = sanitizeErrorDetails(validationError);
       const normalized = details.toLowerCase();
@@ -123,7 +141,11 @@ export default async function handler(req: any, res: any) {
         normalized.includes('rejected') ||
         normalized.includes('unauthorized') ||
         normalized.includes('forbidden') ||
-        normalized.includes('format');
+        normalized.includes('format') ||
+        normalized.includes('scope') ||
+        normalized.includes('store id') ||
+        normalized.includes('project id') ||
+        normalized.includes('required');
 
       return sendJson(res, isUserFixable ? 400 : 503, {
         error: isUserFixable
@@ -134,122 +156,127 @@ export default async function handler(req: any, res: any) {
     }
 
     const providerAccountId = String(validation.providerAccountId ?? '').trim() || null;
-    if ((payload.provider === 'stripe' || payload.provider === 'dodo') && !providerAccountId) {
+    if (!providerAccountId) {
+      const providerDetailsByType: Record<typeof payload.provider, string> = {
+        stripe: 'Use a valid Stripe restricted key with account read scope.',
+        dodo: 'Enter a valid Dodo Store ID and API key with read-only scope to payments or subscriptions.',
+        revenuecat: 'Enter a valid RevenueCat Project ID and key with access to that project.',
+        lemonsqueezy: 'Use a valid LemonSqueezy key with read access to stores.',
+        polar: 'Use a valid Polar key with read access to organizations.',
+      };
       return sendJson(res, 400, {
         error: 'Unable to resolve payment account id from this key.',
-        details: 'Use a valid key with read access to account metadata and retry.',
+        details: providerDetailsByType[payload.provider],
       });
     }
 
-    if (providerAccountId) {
-      const existingConnectionResult = await supabase
-        .from('payment_connections')
-        .select('id, owner_user_id, asset_id, provider')
-        .eq('provider', payload.provider)
-        .eq('provider_account_id', providerAccountId)
+    const existingConnectionResult = await supabase
+      .from('payment_connections')
+      .select('id, owner_user_id, asset_id, provider')
+      .eq('provider', payload.provider)
+      .eq('provider_account_id', providerAccountId)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingConnectionResult.error) {
+      if (isRecoverableSchemaError(existingConnectionResult.error)) {
+        return sendJson(res, 503, {
+          error: 'Connection gatekeeping schema is not ready yet.',
+          details: 'Run the latest Supabase migration to enable provider account gatekeeping.',
+        });
+      }
+      throw existingConnectionResult.error;
+    }
+
+    const existingConnection = existingConnectionResult.data;
+    if (existingConnection && existingConnection.owner_user_id !== user.id) {
+      await writeMarketplaceAuditLog({
+        actorUserId: user.id,
+        assetId: asset.id,
+        action: 'payment_connection_blocked_account_claim',
+        severity: 'BLOCK',
+        reason: 'PROVIDER_ACCOUNT_ALREADY_CLAIMED',
+        metadata: {
+          provider: payload.provider,
+          provider_account_id: providerAccountId,
+          existing_asset_id: existingConnection.asset_id,
+          existing_owner_user_id: existingConnection.owner_user_id,
+        },
+      });
+
+      return sendJson(res, 403, {
+        error: 'This payment account is already linked to another VibeJam listing.',
+        code: 'PROVIDER_ACCOUNT_ALREADY_LINKED',
+      });
+    }
+
+    if (existingConnection && existingConnection.owner_user_id === user.id && existingConnection.asset_id !== asset.id) {
+      let verifiedStatus: 'pending' | 'verified' = 'pending';
+      let metrics: {
+        mrrCents: number;
+        last30dRevenueCents: number;
+        last30dGrowthBps: number;
+        activeSubscribers: number;
+      } | null = null;
+
+      try {
+        const syncResult = await syncConnectionById(existingConnection.id);
+        if (syncResult.ok) {
+          verifiedStatus = 'verified';
+          metrics = toMetricsPreview(syncResult.metrics);
+        }
+      } catch {
+        // Keep response non-blocking; background sync will continue retries.
+      }
+
+      const existingAssetResult = await supabase
+        .from('marketplace_assets')
+        .select('id,slug,verified_status,mrr_cents,last30d_revenue_cents,last30d_growth_bps')
+        .eq('id', existingConnection.asset_id)
         .limit(1)
         .maybeSingle();
 
-      if (existingConnectionResult.error) {
-        if (isRecoverableSchemaError(existingConnectionResult.error)) {
-          return sendJson(res, 503, {
-            error: 'Connection gatekeeping schema is not ready yet.',
-            details: 'Run the latest Supabase migration to enable provider account gatekeeping.',
-          });
-        }
-        throw existingConnectionResult.error;
+      if (existingAssetResult.error) {
+        throw existingAssetResult.error;
       }
 
-      const existingConnection = existingConnectionResult.data;
-      if (existingConnection && existingConnection.owner_user_id !== user.id) {
-        await writeMarketplaceAuditLog({
-          actorUserId: user.id,
-          assetId: asset.id,
-          action: 'payment_connection_blocked_account_claim',
-          severity: 'BLOCK',
-          reason: 'PROVIDER_ACCOUNT_ALREADY_CLAIMED',
-          metadata: {
+      const existingAsset = existingAssetResult.data;
+      await writeMarketplaceAuditLog({
+        actorUserId: user.id,
+        assetId: existingConnection.asset_id,
+        action: 'payment_connection_reused_existing_asset',
+        metadata: {
+          provider: payload.provider,
+          provider_account_id: providerAccountId,
+          requested_asset_id: asset.id,
+          linked_asset_id: existingConnection.asset_id,
+        },
+      });
+
+      return sendJson(res, 200, {
+        data: {
+          connection: {
+            id: existingConnection.id,
             provider: payload.provider,
-            provider_account_id: providerAccountId,
-            existing_asset_id: existingConnection.asset_id,
-            existing_owner_user_id: existingConnection.owner_user_id,
+            reused: true,
           },
-        });
-
-        return sendJson(res, 403, {
-          error: 'This payment account is already linked to another VibeJam listing.',
-          code: 'PROVIDER_ACCOUNT_ALREADY_LINKED',
-        });
-      }
-
-      if (existingConnection && existingConnection.owner_user_id === user.id && existingConnection.asset_id !== asset.id) {
-        let verifiedStatus: 'pending' | 'verified' = 'pending';
-        let metrics: {
-          mrrCents: number;
-          last30dRevenueCents: number;
-          last30dGrowthBps: number;
-          activeSubscribers: number;
-        } | null = null;
-
-        try {
-          const syncResult = await syncConnectionById(existingConnection.id);
-          if (syncResult.ok) {
-            verifiedStatus = 'verified';
-            metrics = toMetricsPreview(syncResult.metrics);
-          }
-        } catch {
-          // Keep response non-blocking; background sync will continue retries.
-        }
-
-        const existingAssetResult = await supabase
-          .from('marketplace_assets')
-          .select('id,slug,verified_status,mrr_cents,last30d_revenue_cents,last30d_growth_bps')
-          .eq('id', existingConnection.asset_id)
-          .limit(1)
-          .maybeSingle();
-
-        if (existingAssetResult.error) {
-          throw existingAssetResult.error;
-        }
-
-        const existingAsset = existingAssetResult.data;
-        await writeMarketplaceAuditLog({
-          actorUserId: user.id,
-          assetId: existingConnection.asset_id,
-          action: 'payment_connection_reused_existing_asset',
-          metadata: {
-            provider: payload.provider,
-            provider_account_id: providerAccountId,
-            requested_asset_id: asset.id,
-            linked_asset_id: existingConnection.asset_id,
-          },
-        });
-
-        return sendJson(res, 200, {
-          data: {
-            connection: {
-              id: existingConnection.id,
-              provider: payload.provider,
-              reused: true,
-            },
-            verifiedStatus: existingAsset?.verified_status === 'verified' ? 'verified' : verifiedStatus,
-            warning: validation.warning,
-            providerAccountId,
-            metrics:
-              metrics
-              ?? (existingAsset
-                ? {
-                    mrrCents: Math.max(0, Number(existingAsset.mrr_cents ?? 0)),
-                    last30dRevenueCents: Math.max(0, Number(existingAsset.last30d_revenue_cents ?? 0)),
-                    last30dGrowthBps: Math.round(Number(existingAsset.last30d_growth_bps ?? 0)),
-                    activeSubscribers: 0,
-                  }
-                : null),
-            existingAssetId: existingAsset?.id ?? existingConnection.asset_id,
-            existingAssetSlug: existingAsset?.slug ?? null,
-          },
-        });
-      }
+          verifiedStatus: existingAsset?.verified_status === 'verified' ? 'verified' : verifiedStatus,
+          warning: validation.warning,
+          providerAccountId,
+          metrics:
+            metrics
+            ?? (existingAsset
+              ? {
+                  mrrCents: Math.max(0, Number(existingAsset.mrr_cents ?? 0)),
+                  last30dRevenueCents: Math.max(0, Number(existingAsset.last30d_revenue_cents ?? 0)),
+                  last30dGrowthBps: Math.round(Number(existingAsset.last30d_growth_bps ?? 0)),
+                  activeSubscribers: 0,
+                }
+              : null),
+          existingAssetId: existingAsset?.id ?? existingConnection.asset_id,
+          existingAssetSlug: existingAsset?.slug ?? null,
+        },
+      });
     }
 
     const encrypted = encryptSecret(payload.apiKey);

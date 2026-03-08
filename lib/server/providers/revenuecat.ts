@@ -66,13 +66,58 @@ const parseProjects = (payload: any): unknown[] => {
   return [];
 };
 
+const extractRevenueCatProjectId = (row: unknown): string | null => {
+  if (!row || typeof row !== 'object') {
+    return null;
+  }
+  const record = row as Record<string, unknown>;
+
+  const directCandidates = [
+    record.id,
+    record.project_id,
+    record.projectId,
+    record.uid,
+    record.identifier,
+  ];
+  for (const candidate of directCandidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  const nestedAttributes =
+    record.attributes && typeof record.attributes === 'object'
+      ? (record.attributes as Record<string, unknown>)
+      : null;
+  if (nestedAttributes) {
+    const nestedCandidates = [
+      nestedAttributes.id,
+      nestedAttributes.project_id,
+      nestedAttributes.projectId,
+      nestedAttributes.uid,
+      nestedAttributes.identifier,
+    ];
+    for (const candidate of nestedCandidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+
+  return null;
+};
+
 export const revenueCatAdapter: ProviderAdapter = {
   provider: 'revenuecat',
 
-  async validateKey(key: string) {
+  async validateKey(key: string, options) {
     const trimmed = key.trim();
     if (!trimmed.startsWith('sk_')) {
       throw new Error('RevenueCat key must start with sk_.');
+    }
+    const projectId = String(options?.providerAccountId ?? '').trim();
+    if (!projectId) {
+      throw new Error('RevenueCat Project ID is required.');
     }
 
     const ping = await revenueCatRequest(trimmed, '/v2/projects');
@@ -83,8 +128,19 @@ export const revenueCatAdapter: ProviderAdapter = {
       throw new Error(`RevenueCat validation failed (${ping.status}).`);
     }
 
+    const projects = parseProjects(ping.payload);
+    if (projects.length > 0) {
+      const normalizedProjectIds = projects
+        .map((project) => extractRevenueCatProjectId(project))
+        .filter((id): id is string => Boolean(id));
+      if (normalizedProjectIds.length > 0 && !normalizedProjectIds.includes(projectId)) {
+        throw new Error('RevenueCat Project ID does not match the connected key scope.');
+      }
+    }
+
     return {
       readOnlyLikely: true,
+      providerAccountId: projectId,
       warning:
         'RevenueCat is read-focused for subscription state. Payment collection remains in app stores.',
     };

@@ -22,15 +22,20 @@ import CanvasPublicPage from './components/CanvasPublicPage';
 import DealRoomView from './components/DealRoomView';
 import {
   addWishlistItem,
+  connectMarketplaceAsset,
   createMarketplaceAssetDraft,
   deleteJam,
   fetchApps,
   fetchInboxConversations,
+  fetchMyMarketplaceAssets,
   fetchNotifications,
+  generateMarketplaceAssetDeck,
   fetchProfileMarketplaceSummary,
   publishMarketplaceAsset,
   publishApp,
   removeWishlistItem,
+  updateMarketplaceAssetFinancials,
+  updateMarketplaceAssetTraffic,
 } from './lib/api';
 import { supabase } from './lib/supabase-client';
 import type { User } from '@supabase/supabase-js';
@@ -49,6 +54,62 @@ const ALL_CATEGORIES = [
   "Travel", "Utilities"
 ];
 
+const normalizeCategoryToken = (value: string): string =>
+  String(value ?? '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+
+const matchesCategoryToken = (candidate: string, selected: string): boolean => {
+  const candidateNormalized = normalizeCategoryToken(candidate);
+  const selectedNormalized = normalizeCategoryToken(selected);
+
+  if (!candidateNormalized || !selectedNormalized) {
+    return false;
+  }
+
+  if (candidateNormalized === selectedNormalized) {
+    return true;
+  }
+
+  const compactCandidate = candidateNormalized.replace(/\s+/g, '');
+  const compactSelected = selectedNormalized.replace(/\s+/g, '');
+
+  return (
+    compactCandidate === compactSelected
+    || compactCandidate.includes(compactSelected)
+    || compactSelected.includes(compactCandidate)
+  );
+};
+
+const isMarketplaceRankedApp = (app: VibeApp): boolean => {
+  const tags = Array.isArray(app.tags) ? app.tags : [];
+  return Boolean(
+    app.isForSale
+    || app.publishToMarketplace
+    || app.marketplaceAssetId
+    || app.askingPrice
+    || app.marketplaceAskingPriceUsd
+    || tags.some((tag) => matchesCategoryToken(tag, 'for sale') || matchesCategoryToken(tag, 'marketplace'))
+  );
+};
+
+const appMatchesRankingFilter = (app: VibeApp, activeFilter: string): boolean => {
+  if (activeFilter === 'All') {
+    return true;
+  }
+
+  if (activeFilter === 'Marketplace') {
+    return isMarketplaceRankedApp(app);
+  }
+
+  const tagCandidates = Array.isArray(app.tags) ? app.tags : [];
+  const candidates = [app.category, ...tagCandidates].filter(Boolean);
+  return candidates.some((candidate) => matchesCategoryToken(candidate, activeFilter));
+};
+
 const RESERVED_PUBLIC_PATHS = new Set(['', 'rankings', 'marketplace', 'canvas']);
 
 const isImageIconSource = (value: string | undefined | null): boolean => {
@@ -60,6 +121,32 @@ const isImageIconSource = (value: string | undefined | null): boolean => {
     || normalized.startsWith('blob:')
     || normalized.startsWith('/')
   );
+};
+
+const extractPitchDeckCoverImage = (pitchDecks: VibeApp['pitchDecks'] | null | undefined): string | null => {
+  if (!pitchDecks || !Array.isArray(pitchDecks.slides)) {
+    return null;
+  }
+  const cover = pitchDecks.slides.find((slide) => typeof slide.imageUrl === 'string' && slide.imageUrl.trim().length > 0);
+  return cover?.imageUrl ?? null;
+};
+
+const resolveMarketplaceProfitMarginPercent = (app: Partial<VibeApp>): number => {
+  const direct = typeof app.profitMargin === 'number' && Number.isFinite(app.profitMargin)
+    ? app.profitMargin
+    : null;
+  if (direct !== null) {
+    return Math.max(0, Math.min(100, direct));
+  }
+
+  const fromBps = typeof app.profitMarginBps === 'number' && Number.isFinite(app.profitMarginBps)
+    ? app.profitMarginBps / 100
+    : null;
+  if (fromBps !== null) {
+    return Math.max(0, Math.min(100, fromBps));
+  }
+
+  return 0;
 };
 
 const getPublicSlugFromPath = (): string | null => {
@@ -307,13 +394,10 @@ const App: React.FC = () => {
     };
   }, [authUser]);
 
-  const filteredApps = apps.filter(app => {
-    if (filter === 'All') return true;
-    // Marketplace filter shows apps that are for sale
-    if (filter === 'Marketplace') return app.isForSale;
-    // Case-insensitive check for the broad category list
-    return app.category.toLowerCase() === filter.toLowerCase();
-  });
+  const filteredApps = useMemo(
+    () => apps.filter((app) => appMatchesRankingFilter(app, filter)),
+    [apps, filter],
+  );
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
   const authEmail = authUser?.email ?? '';
@@ -356,6 +440,86 @@ const App: React.FC = () => {
     }));
   }, [apps, authEmail, authUser, handle]);
 
+  const normalizeAssetKey = (value: string | undefined | null): string =>
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+
+  const findExistingMarketplaceAssetId = async (sourceApp: VibeApp): Promise<string | null> => {
+    try {
+      const response = await fetchMyMarketplaceAssets();
+      const items = Array.isArray(response.items) ? response.items : [];
+      const sourceJamId = String(sourceApp.id ?? '').trim();
+
+      if (sourceJamId) {
+        const byJamId = items.find(
+          (item) => String((item as any)?.jamId ?? '').trim() === sourceJamId,
+        );
+        if (byJamId?.id) {
+          return String(byJamId.id);
+        }
+      }
+
+      const targetName = normalizeAssetKey(sourceApp.name);
+      if (targetName) {
+        const byName = items.find((item) => normalizeAssetKey(item.name) === targetName);
+        if (byName?.id) {
+          return String(byName.id);
+        }
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
+  };
+
+  const resolveMarketplaceAssetIdForPublish = async (
+    sourceApp: VibeApp,
+    founderEmail: string,
+  ): Promise<string> => {
+    const existingDraftId = String(sourceApp.marketplaceDraftAssetId ?? '').trim();
+    if (existingDraftId) {
+      return existingDraftId;
+    }
+
+    try {
+      const draftResponse = await createMarketplaceAssetDraft({
+        name: sourceApp.name,
+        tagline: sourceApp.pitch || `${sourceApp.name} is now open for acquisition.`,
+        description: sourceApp.solution || sourceApp.pitch || `${sourceApp.name} is now open for acquisition.`,
+        logoUrl: isImageIconSource(sourceApp.icon) ? sourceApp.icon : undefined,
+        category: sourceApp.category,
+        founderName: sourceApp.founder.name,
+        founderEmail,
+        isAnonymous: Boolean(sourceApp.isAnonymous),
+        visibility: sourceApp.marketplaceVisibility ?? 'public',
+        techStack: sourceApp.techStack ?? [],
+        jamId: sourceApp.id,
+      });
+
+      const draftAsset = draftResponse.asset as { id?: string } | undefined;
+      const resolvedId = String(draftAsset?.id ?? '').trim();
+      if (resolvedId) {
+        return resolvedId;
+      }
+    } catch (error) {
+      const existingAssetId = await findExistingMarketplaceAssetId(sourceApp);
+      if (existingAssetId) {
+        return existingAssetId;
+      }
+      throw error;
+    }
+
+    const existingAssetId = await findExistingMarketplaceAssetId(sourceApp);
+    if (existingAssetId) {
+      return existingAssetId;
+    }
+
+    throw new Error('Marketplace draft was created without an asset id.');
+  };
+
   const publishJamToMarketplace = async (sourceApp: VibeApp) => {
     if (!authUser) {
       setLoadError('Sign in to publish this jam to Marketplace.');
@@ -376,28 +540,11 @@ const App: React.FC = () => {
       || String(Math.max(5000, Math.round((sourceApp.monthlyRevenue || 0) * 48)));
 
     try {
-      const draftResponse = await createMarketplaceAssetDraft({
-        name: sourceApp.name,
-        tagline: sourceApp.pitch || `${sourceApp.name} is now open for acquisition.`,
-        description: sourceApp.solution || sourceApp.pitch || `${sourceApp.name} is now open for acquisition.`,
-        logoUrl: isImageIconSource(sourceApp.icon) ? sourceApp.icon : undefined,
-        category: sourceApp.category,
-        founderName: sourceApp.founder.name,
-        founderEmail,
-        isAnonymous: Boolean(sourceApp.isAnonymous),
-        visibility: sourceApp.marketplaceVisibility ?? 'public',
-        techStack: sourceApp.techStack ?? [],
-        jamId: sourceApp.id,
-      });
+      const draftAssetId = await resolveMarketplaceAssetIdForPublish(sourceApp, founderEmail);
 
-      const draftAsset = draftResponse.asset as { id: string } | undefined;
-      if (!draftAsset?.id) {
-        throw new Error('Marketplace draft was created without an asset id.');
-      }
-
-      const publishResponse = await publishMarketplaceAsset(draftAsset.id, {
+      const publishResponse = await publishMarketplaceAsset(draftAssetId, {
         askingPriceUsd,
-        profitMarginPercent: sourceApp.profitMargin ?? null,
+        profitMarginPercent: resolveMarketplaceProfitMarginPercent(sourceApp),
         tier: sourceApp.marketplaceBoostTierId ?? 'free',
         visibility: sourceApp.marketplaceVisibility ?? 'public',
       });
@@ -429,11 +576,12 @@ const App: React.FC = () => {
         window.dispatchEvent(new CustomEvent('profile:refresh-marketplace'));
       }
     } catch (error) {
-      setLoadError(
+      const message =
         error instanceof Error
           ? `Marketplace publish failed: ${error.message}`
-          : 'Marketplace publish failed due to an unknown error.',
-      );
+          : 'Marketplace publish failed due to an unknown error.';
+      setLoadError(message);
+      throw new Error(message);
     }
   };
 
@@ -474,6 +622,21 @@ const App: React.FC = () => {
     setLoadError(null);
     const shouldAttemptMarketplacePublish =
       newApp.publishSource === 'start-jam' && Boolean(newApp.publishToMarketplace);
+    const startJamMarketplaceIntent: Partial<VibeApp> = shouldAttemptMarketplacePublish
+      ? {
+          publishSource: 'start-jam',
+          publishToMarketplace: true,
+          marketplaceAskingPriceUsd: newApp.marketplaceAskingPriceUsd,
+          marketplaceVisibility: newApp.marketplaceVisibility,
+          marketplaceFounderPublic: newApp.marketplaceFounderPublic,
+          marketplaceProfitMarginPercent: newApp.marketplaceProfitMarginPercent,
+          marketplaceBoostTierId: newApp.marketplaceBoostTierId,
+          includePitchDeck: newApp.includePitchDeck,
+          pitchDecks: newApp.pitchDecks,
+          pitchDeckCoverImageUrl: newApp.pitchDeckCoverImageUrl,
+          marketplaceDraftAssetId: newApp.marketplaceDraftAssetId,
+        }
+      : {};
     const rankingsPublishApp: VibeApp = shouldAttemptMarketplacePublish
       ? {
           ...newApp,
@@ -512,7 +675,7 @@ const App: React.FC = () => {
         setApps(publishedApps);
         const matched = publishedApps.find((item) => item.id === newApp.id || item.name === newApp.name);
         if (matched) {
-          publishedApp = { ...newApp, ...matched };
+          publishedApp = { ...newApp, ...matched, ...startJamMarketplaceIntent };
         }
       } else {
         upsertLocalApp(rankingsPublishApp);
@@ -523,10 +686,7 @@ const App: React.FC = () => {
       setLoadError(error instanceof Error ? error.message : 'Publish failed on backend; saved locally only.');
     }
 
-    const shouldPublishToMarketplace =
-      publishedApp.publishSource === 'start-jam'
-      && Boolean(publishedApp.publishToMarketplace)
-      && !publishedApp.marketplaceAssetId;
+    const shouldPublishToMarketplace = shouldAttemptMarketplacePublish;
 
     if (shouldPublishToMarketplace) {
       const founderEmail = publishedApp.founder.email ?? authEmail;
@@ -541,34 +701,89 @@ const App: React.FC = () => {
         setLoadError('Jam published to Rankings. Founder email is required for Marketplace listing.');
       } else {
         try {
-          const draftResponse = await createMarketplaceAssetDraft({
-            name: publishedApp.name,
-            tagline: publishedApp.pitch || `${publishedApp.name} is now open for acquisition.`,
-            description: publishedApp.solution || publishedApp.pitch || `${publishedApp.name} is now open for acquisition.`,
-            logoUrl: isImageIconSource(publishedApp.icon) ? publishedApp.icon : undefined,
-            category: publishedApp.category,
-            founderName: publishedApp.founder.name,
-            founderEmail,
-            isAnonymous: Boolean(publishedApp.isAnonymous),
-            visibility: publishedApp.marketplaceVisibility ?? 'public',
-            techStack: publishedApp.techStack ?? [],
-            jamId: publishedApp.id,
-          });
+          const draftAssetId = await resolveMarketplaceAssetIdForPublish(publishedApp, founderEmail);
+          const provider = publishedApp.verificationProvider;
+          const providerApiKey = String(publishedApp.verificationApiKey ?? '').trim();
+          const providerAccountId = String(publishedApp.verificationProviderAccountId ?? '').trim();
 
-          const draftAsset = draftResponse.asset as { id: string } | undefined;
-          if (!draftAsset?.id) {
-            throw new Error('Marketplace draft was created without an asset id.');
+          if (provider && providerApiKey) {
+            const connectResponse = await connectMarketplaceAsset(draftAssetId, {
+              provider,
+              apiKey: providerApiKey,
+              providerAccountId: providerAccountId || undefined,
+              isAnonymous: Boolean(publishedApp.isAnonymous),
+            });
+
+            if (connectResponse.metrics) {
+              publishedApp = {
+                ...publishedApp,
+                monthlyRevenue: Math.max(
+                  0,
+                  Math.round(Number(connectResponse.metrics.mrrCents || 0) / 100),
+                ),
+                growth: Number(
+                  (Number(connectResponse.metrics.last30dGrowthBps || 0) / 100).toFixed(2),
+                ),
+                activeUsers: Math.max(
+                  0,
+                  Number(connectResponse.metrics.activeSubscribers || publishedApp.activeUsers || 0),
+                ),
+              };
+            }
           }
 
-          const publishResponse = await publishMarketplaceAsset(draftAsset.id, {
+          const publishResponse = await publishMarketplaceAsset(draftAssetId, {
             askingPriceUsd,
-            profitMarginPercent: publishedApp.profitMargin ?? null,
+            profitMarginPercent: resolveMarketplaceProfitMarginPercent(publishedApp),
             tier: publishedApp.marketplaceBoostTierId ?? 'free',
             visibility: publishedApp.marketplaceVisibility ?? 'public',
           });
 
           if ('requiresPayment' in publishResponse && publishResponse.requiresPayment) {
             throw new Error('Boost payment is required before this marketplace listing can go live.');
+          }
+
+          const operatingExpensesUsd = Number(publishedApp.monthlyOperatingExpensesUsd);
+          if (Number.isFinite(operatingExpensesUsd) && operatingExpensesUsd >= 0) {
+            try {
+              await updateMarketplaceAssetFinancials(draftAssetId, {
+                operatingExpenses: operatingExpensesUsd,
+                expenseBreakdown: '',
+              });
+            } catch {
+              // Non-blocking metadata sync.
+            }
+          }
+
+          const monthlyVisitors = Number(publishedApp.monthlyUniqueVisitors ?? publishedApp.activeUsers ?? 0);
+          const analyticsProofUrl = String(publishedApp.analyticsProofUrl ?? '').trim();
+          if ((Number.isFinite(monthlyVisitors) && monthlyVisitors > 0) || analyticsProofUrl) {
+            try {
+              await updateMarketplaceAssetTraffic(draftAssetId, {
+                monthlyUniqueVisitors: Math.max(0, Math.round(monthlyVisitors || 0)),
+                analyticsProofUrl: analyticsProofUrl || undefined,
+              });
+            } catch {
+              // Non-blocking metadata sync.
+            }
+          }
+
+          let pitchDeckCoverImageUrl =
+            publishedApp.pitchDeckCoverImageUrl
+            ?? extractPitchDeckCoverImage(publishedApp.pitchDecks);
+
+          if (publishedApp.includePitchDeck && !pitchDeckCoverImageUrl) {
+            try {
+              const deckResponse = await generateMarketplaceAssetDeck(draftAssetId, { forceRegenerate: false });
+              pitchDeckCoverImageUrl = extractPitchDeckCoverImage(deckResponse.pitchDecks);
+              publishedApp = {
+                ...publishedApp,
+                pitchDecks: deckResponse.pitchDecks,
+                pitchDeckCoverImageUrl,
+              };
+            } catch {
+              // Non-blocking AI upsell fulfillment.
+            }
           }
 
           const enrichedApp: VibeApp = {
@@ -580,6 +795,7 @@ const App: React.FC = () => {
             valuationMultipleX100: publishResponse.valuationMultipleX100 ?? null,
             boostTier: 'Free',
             isOwnerListing: true,
+            pitchDeckCoverImageUrl,
           };
 
           publishedApp = enrichedApp;
@@ -598,6 +814,31 @@ const App: React.FC = () => {
           );
         }
       }
+    }
+
+    // Final backend truth-sync so Rankings reflects the persisted source of record.
+    try {
+      const refreshedApps = await fetchApps();
+      if (refreshedApps.length > 0) {
+        setApps(refreshedApps);
+
+        const targetName = String(newApp.name ?? '').trim().toLowerCase();
+        const targetFounderEmail = String(newApp.founder?.email ?? '').trim().toLowerCase();
+        const hasPublishedJam = refreshedApps.some((app) => {
+          const appName = String(app.name ?? '').trim().toLowerCase();
+          const appFounderEmail = String(app.founder?.email ?? '').trim().toLowerCase();
+          if (targetFounderEmail) {
+            return appName === targetName && appFounderEmail === targetFounderEmail;
+          }
+          return appName === targetName;
+        });
+
+        if (!hasPublishedJam) {
+          setLoadError('Publish completed but backend has not confirmed this jam on Rankings yet. Please retry.');
+        }
+      }
+    } catch {
+      // Non-blocking: keep local state if refresh fails.
     }
 
     setIsPublishing(false);
@@ -839,18 +1080,20 @@ const App: React.FC = () => {
                   <p className="text-zinc-500 text-base sm:text-lg font-medium">Verified revenue. Live progress. No fluff.</p>
                 </div>
 
-                <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0 no-scrollbar relative">
-                  {QUICK_FILTERS.map((item) => (
-                    <button
-                      key={item}
-                      onClick={() => { setFilter(item); setIsCategoryMenuOpen(false); }}
-                      className={`px-5 py-2 rounded-full text-xs font-bold transition-all border shrink-0
-                        ${filter === item ? 'bg-white text-black border-white' : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/30'}`}
-                    >
-                      {item}
-                    </button>
-                  ))}
-                  
+                <div className="flex items-center gap-2 pb-2 sm:pb-0 relative overflow-visible w-full lg:w-auto">
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar flex-1 min-w-0">
+                    {QUICK_FILTERS.map((item) => (
+                      <button
+                        key={item}
+                        onClick={() => { setFilter(item); setIsCategoryMenuOpen(false); }}
+                        className={`px-5 py-2 rounded-full text-xs font-bold transition-all border shrink-0
+                          ${filter === item ? 'bg-white text-black border-white' : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/30'}`}
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+
                   {/* Strategic Extension Filter */}
                   <div className="relative shrink-0">
                     <button

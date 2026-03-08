@@ -613,8 +613,8 @@ export default async function handler(req: any, res: any) {
     );
 
     const profitMarginBps = payload.profitMarginPercent === null || payload.profitMarginPercent === undefined
-      ? null
-      : Math.round(payload.profitMarginPercent * 100);
+      ? (toNonNegativeInt(asset.profit_margin_bps) ?? 0)
+      : Math.max(0, Math.round(payload.profitMarginPercent * 100));
     const trailingRevenueCents = Number(asset.last30d_revenue_cents ?? 0);
     const trailingExpensesCents = Number(asset.trailing_30d_expenses_cents ?? 0);
     const trailingProfitCents = trailingRevenueCents - trailingExpensesCents;

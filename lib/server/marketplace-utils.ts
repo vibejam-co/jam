@@ -115,15 +115,25 @@ export const isRecoverableSchemaError = (error: unknown): boolean => {
       ? String((error as { code?: unknown }).code ?? '').trim()
       : '';
   const message = sanitizeErrorDetails(error).toLowerCase();
+
+  const isPostgrestSchemaCode = errorCode.toUpperCase().startsWith('PGRST2');
+
+  // If Postgres returned a concrete non-schema code (e.g. NOT NULL / UNIQUE),
+  // do not treat it as a schema fallback scenario.
+  if (errorCode && errorCode !== '42703' && errorCode !== '42P01' && !isPostgrestSchemaCode) {
+    return false;
+  }
+
   return (
     errorCode === '42703' ||
+    errorCode === '42P01' ||
+    isPostgrestSchemaCode ||
     message.includes('does not exist') ||
     message.includes('schema cache') ||
     message.includes('could not find') ||
-    message.includes('relation') ||
-    message.includes('column') ||
     message.includes('undefined column') ||
     message.includes('42703') ||
+    message.includes('42p01') ||
     message.includes('pgrst20')
   );
 };

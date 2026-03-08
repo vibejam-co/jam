@@ -50,6 +50,21 @@ export interface VibeApp {
   marketplaceVisibility?: MarketplaceVisibility;
   marketplaceBoostTierId?: MarketplaceBoostTier;
   websiteUrl?: string;
+  netProfitCents?: number | null;
+  profitMarginBps?: number | null;
+  monthlyUniqueVisitors?: number | null;
+  churnBps?: number | null;
+  analyticsProofUrl?: string | null;
+  monthlyOperatingExpensesUsd?: number | null;
+  verificationProvider?: MarketplaceProvider;
+  verificationApiKey?: string;
+  verificationProviderAccountId?: string | null;
+  marketplaceFounderPublic?: boolean;
+  marketplaceProfitMarginPercent?: number;
+  includePitchDeck?: boolean;
+  pitchDecks?: MarketplacePitchDecks | null;
+  pitchDeckCoverImageUrl?: string | null;
+  marketplaceDraftAssetId?: string | null;
 }
 
 export interface MarketItem {
@@ -242,6 +257,7 @@ export type MarketplaceBoostTier = 'free' | 'pro' | 'elite';
 
 export interface MarketplaceAssetCard {
   id: string;
+  jamId?: string | null;
   marketplaceAssetId?: string;
   slug: string;
   name: string;
@@ -400,6 +416,32 @@ export interface MarketplaceAssetTrafficResponse {
   analyticsProofUrl: string;
 }
 
+export interface PitchDeckSlide {
+  slideNumber: number;
+  title: string;
+  copy?: string;
+  bodyText?: string;
+  metricsToHighlight?: string[];
+  nanoBananaPrompt?: string;
+  imagePrompt?: string;
+  imageUrl?: string;
+  backgroundImageBase64?: string;
+}
+
+export interface MarketplacePitchDecks {
+  generatedAt?: string;
+  model?: string;
+  imageModel?: string;
+  themeDeduced?: string;
+  slides: PitchDeckSlide[];
+}
+
+export interface MarketplaceGenerateDeckResponse {
+  assetId: string;
+  reused: boolean;
+  pitchDecks: MarketplacePitchDecks;
+}
+
 export interface MarketplaceAssetDraftInput {
   name: string;
   tagline: string;
@@ -419,6 +461,7 @@ export interface MarketplaceAssetDraftInput {
 export interface MarketplaceConnectInput {
   provider: MarketplaceProvider;
   apiKey: string;
+  providerAccountId?: string;
   isAnonymous?: boolean;
 }
 
@@ -533,6 +576,7 @@ export interface DealEscrowCreateResponse {
   transactionId: string;
   escrowStatus: string | null;
   landingPage: string | null;
+  transactionPortalUrl?: string | null;
   existingTransaction: boolean;
   deal?: DealRoomData;
 }
@@ -632,6 +676,7 @@ export interface AcquirePipelineItem {
   updatedAt: string;
   lastActivityAt: string;
   conversationId: string | null;
+  dealOfferId?: string | null;
   listing: AcquirePipelineListing;
 }
 

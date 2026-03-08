@@ -315,7 +315,7 @@ const computeChurnRateBps = (transactions: NormalizedTransaction[]): number => {
 export const stripeAdapter: ProviderAdapter = {
   provider: 'stripe',
 
-  async validateKey(key: string) {
+  async validateKey(key: string, _options) {
     if (!key.startsWith('rk_live_')) {
       throw new Error('Stripe key must be a live restricted key (rk_live_...).');
     }
