@@ -144,6 +144,7 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
     profitMargin: 80,
     monthlyOperatingExpenses: 0,
     activeUsers: 0,
+    monthlyUniqueVisitors: 0,
     analyticsProofUrl: '',
     includePitchDeck: false,
     isAnonymous: false,
@@ -210,14 +211,18 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       return draftAssetId;
     }
 
+    const rawPitch = String(formData.pitch ?? '').trim();
+    const fallbackTagline = `${formData.name} is now open for acquisition.`;
+    const tagline = (rawPitch || fallbackTagline).slice(0, 220);
+    const description = rawPitch || fallbackTagline;
     const techStackArray = formData.techStack
       ? formData.techStack.split(',').map((item) => item.trim()).filter(Boolean)
       : [];
 
     const response = await createMarketplaceAssetDraft({
       name: formData.name,
-      tagline: formData.pitch || `${formData.name} is now open for acquisition.`,
-      description: formData.pitch || `${formData.name} is now open for acquisition.`,
+      tagline,
+      description,
       logoUrl: formData.logoUrl.trim(),
       websiteUrl: formData.website.trim() || undefined,
       category: formData.category,
@@ -233,17 +238,21 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
   };
 
   const syncDraftForDeckPreview = async (assetId: string): Promise<void> => {
+    const rawPitch = String(formData.pitch ?? '').trim();
+    const fallbackTagline = `${formData.name} is now open for acquisition.`;
+    const tagline = (rawPitch || fallbackTagline).slice(0, 220);
+    const description = rawPitch || fallbackTagline;
     const techStackArray = formData.techStack
       ? formData.techStack.split(',').map((item) => item.trim()).filter(Boolean)
       : [];
     const normalizedOperatingExpenses = Math.max(0, Number(formData.monthlyOperatingExpenses || 0));
-    const normalizedActiveUsers = Math.max(0, Number(formData.activeUsers || 0));
+    const normalizedWebTraffic = Math.max(0, Number(formData.monthlyUniqueVisitors || 0));
     const normalizedAnalyticsProofUrl = formData.analyticsProofUrl.trim();
 
     await updateMarketplaceAsset(assetId, {
       name: formData.name,
-      tagline: formData.pitch || `${formData.name} is now open for acquisition.`,
-      description: formData.pitch || `${formData.name} is now open for acquisition.`,
+      tagline,
+      description,
       websiteUrl: formData.website.trim() || undefined,
       category: formData.category,
       techStack: techStackArray,
@@ -260,9 +269,9 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       expenseBreakdown: '',
     });
 
-    if (normalizedActiveUsers > 0 || normalizedAnalyticsProofUrl.length > 0) {
+    if (normalizedWebTraffic > 0 || normalizedAnalyticsProofUrl.length > 0) {
       await updateMarketplaceAssetTraffic(assetId, {
-        monthlyUniqueVisitors: normalizedActiveUsers,
+        monthlyUniqueVisitors: normalizedWebTraffic,
         analyticsProofUrl: normalizedAnalyticsProofUrl || undefined,
       });
     }
@@ -369,6 +378,7 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       const assetId = await ensureDraft();
       const normalizedOperatingExpenses = Math.max(0, Number(formData.monthlyOperatingExpenses || 0));
       const normalizedActiveUsers = Math.max(0, Number(formData.activeUsers || 0));
+      const normalizedWebTraffic = Math.max(0, Number(formData.monthlyUniqueVisitors || 0));
       const normalizedAnalyticsProofUrl = formData.analyticsProofUrl.trim();
 
       const selectedTierId = paidBoostsEnabled ? TIER_ID_MAP[selectedTier] : 'free';
@@ -422,10 +432,10 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
         // Non-blocking: listing remains live even if optional financial metadata save retries later.
       }
 
-      if (normalizedActiveUsers > 0 || normalizedAnalyticsProofUrl.length > 0) {
+      if (normalizedWebTraffic > 0 || normalizedAnalyticsProofUrl.length > 0) {
         try {
           await updateMarketplaceAssetTraffic(assetId, {
-            monthlyUniqueVisitors: normalizedActiveUsers,
+            monthlyUniqueVisitors: normalizedWebTraffic,
             analyticsProofUrl: normalizedAnalyticsProofUrl || undefined,
           });
         } catch {
@@ -491,7 +501,7 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
         isOwnerListing: true,
         netProfitCents: Math.round(normalizedNetProfitUsd * 100),
         monthlyOperatingExpensesUsd: normalizedOperatingExpenses,
-        monthlyUniqueVisitors: normalizedActiveUsers,
+        monthlyUniqueVisitors: normalizedWebTraffic,
         analyticsProofUrl: normalizedAnalyticsProofUrl || undefined,
         includePitchDeck: formData.includePitchDeck,
         pitchDeckCoverImageUrl,
@@ -1017,7 +1027,25 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                       }
                       className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-5 text-white focus:outline-none"
                     />
+                    <p className="text-[10px] text-zinc-600">Use logged-in monthly active users (MAU), not website visits.</p>
                   </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Web Traffic (30D Visits)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="0"
+                    value={formData.monthlyUniqueVisitors}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        monthlyUniqueVisitors: Math.max(0, Number.parseInt(e.target.value || '0', 10) || 0),
+                      }))
+                    }
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white focus:outline-none"
+                  />
                 </div>
 
                 <div className="space-y-3">

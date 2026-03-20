@@ -1,8 +1,20 @@
 import { listDodoPayments } from '../dodo-payments.js';
 import type { NormalizedTransaction, ProviderAdapter, ProviderMetrics } from './types.js';
 
-const DODO_API_BASE = (process.env.DODO_API_BASE_URL?.trim() || 'https://api.dodopayments.com')
-  .replace(/\/+$/, '');
+const DODO_DEFAULT_API_BASE = 'https://api.dodopayments.com';
+
+const DODO_API_BASE = (() => {
+  const fromEnv = process.env.DODO_API_BASE_URL?.trim();
+  if (!fromEnv) {
+    return DODO_DEFAULT_API_BASE;
+  }
+  const normalized = fromEnv.replace(/\/+$/, '');
+  try {
+    return new URL(normalized).toString().replace(/\/+$/, '');
+  } catch {
+    return DODO_DEFAULT_API_BASE;
+  }
+})();
 
 const toCents = (value: unknown): number => {
   if (typeof value === 'number' && Number.isFinite(value)) {

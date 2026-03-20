@@ -25,7 +25,12 @@ const getDodoApiBase = (): string => {
   if (!fromEnv) {
     return DODO_DEFAULT_API_BASE;
   }
-  return fromEnv.replace(/\/+$/, '');
+  const normalized = fromEnv.replace(/\/+$/, '');
+  try {
+    return new URL(normalized).toString().replace(/\/+$/, '');
+  } catch {
+    return DODO_DEFAULT_API_BASE;
+  }
 };
 
 const getErrorMessage = (payload: unknown, status: number): string => {

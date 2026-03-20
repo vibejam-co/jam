@@ -18,6 +18,13 @@ const DeckViewer: React.FC<DeckViewerProps> = ({ assetName, decks, onClose }) =>
   const currentSlideMetrics = Array.isArray(currentSlide?.metricsToHighlight)
     ? currentSlide.metricsToHighlight
     : [];
+  const currentSlideDataPoints = Array.isArray(currentSlide?.dataPoints) ? currentSlide.dataPoints : [];
+  const currentSlideTheme = typeof currentSlide?.theme === 'string' ? currentSlide.theme : '';
+  const currentSlideHeadline =
+    (typeof currentSlide?.headline === 'string' && currentSlide.headline.trim())
+    || currentSlide?.title
+    || '';
+  const currentSlideSubheadline = typeof currentSlide?.subheadline === 'string' ? currentSlide.subheadline : '';
   const currentSlideBody = currentSlide?.bodyText ?? currentSlide?.copy ?? '';
   const currentSlideBackgroundStyle = currentSlide?.backgroundImageBase64
     ? {
@@ -83,14 +90,36 @@ const DeckViewer: React.FC<DeckViewerProps> = ({ assetName, decks, onClose }) =>
 
                   <div className="relative flex h-full items-end p-8 md:p-12">
                     <div className="relative z-10 w-1/2 max-w-[55%] space-y-5">
-                      <div className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">
-                        <Sparkles className="h-3.5 w-3.5" />
-                        Slide {currentSlide.slideNumber}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">
+                          <Sparkles className="h-3.5 w-3.5" />
+                          Slide {currentSlide.slideNumber}
+                        </div>
+                        {currentSlideTheme ? (
+                          <div className="inline-flex w-fit items-center rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-zinc-100">
+                            {currentSlideTheme}
+                          </div>
+                        ) : null}
                       </div>
 
-                      <h4 className="text-3xl font-black tracking-tight text-white md:text-5xl">{currentSlide.title}</h4>
+                      <h4 className="text-3xl font-black tracking-tight text-white md:text-5xl">{currentSlideHeadline}</h4>
 
-                      <p className="whitespace-pre-line text-sm leading-7 text-zinc-100 md:text-base">{currentSlideBody}</p>
+                      {currentSlideSubheadline ? (
+                        <p className="text-sm font-semibold leading-6 text-zinc-200 md:text-base">{currentSlideSubheadline}</p>
+                      ) : null}
+
+                      {currentSlideDataPoints.length > 0 ? (
+                        <ul className="space-y-3 text-sm leading-7 text-zinc-100 md:text-base">
+                          {currentSlideDataPoints.map((point, index) => (
+                            <li key={`point-${index}-${point}`} className="flex gap-3">
+                              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300" />
+                              <span>{point}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : currentSlideBody ? (
+                        <p className="whitespace-pre-line text-sm leading-7 text-zinc-100 md:text-base">{currentSlideBody}</p>
+                      ) : null}
 
                       {currentSlideMetrics.length > 0 ? (
                         <div className="flex flex-wrap gap-2 pt-2">

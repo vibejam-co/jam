@@ -1,107 +1,192 @@
 import { z } from 'zod';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import { getMethod, methodNotAllowed, parseJsonBody, sendJson } from '../../lib/server/http.js';
 import { getSupabaseAdmin } from '../../lib/server/supabase-admin.js';
 import { getAuthenticatedUser, isMemberUser } from '../../lib/server/auth.js';
-import {
-  isRecoverableSchemaError,
-  sanitizeErrorDetails,
-} from '../../lib/server/marketplace-utils.js';
-import { writeMarketplaceAuditLog } from '../../lib/server/marketplace-audit.js';
+import { isRecoverableSchemaError, sanitizeErrorDetails } from '../../lib/server/marketplace-utils.js';
 
 export const config = {
-  maxDuration: 60,
+  maxDuration: 300,
 };
 
 const RequestPayloadSchema = z.object({
   forceRegenerate: z.boolean().optional().default(false),
 });
 
-const ResearchDeckSlideSchema = z.object({
-  slide_number: z.number().int().min(1).max(6),
-  theme: z.string().trim().min(1).max(240),
-  headline: z.string().trim().min(1).max(400),
-  subheadline: z.string().trim().min(1).max(400),
-  data_points: z.array(z.string().trim().min(1).max(500)).length(2),
-  nano_banana_prompt: z.string().trim().min(1).max(4000),
+const RawIntelligencePayloadSchema = z.object({
+  project_name: z.string().trim().min(1),
+  website_url: z.string().trim().nullable(),
+  website_context_text: z.string().trim().nullable(),
+  website_context_note: z.string().trim().min(1),
+  category: z.string().trim().nullable(),
+  verified_mrr: z.number().int().nonnegative(),
+  last_30d_revenue: z.number().int().nonnegative(),
+  profit_margin: z.number().int().nonnegative(),
+  monthly_expenses: z.number().int().nonnegative(),
+  active_users: z.number().int().nonnegative(),
+  asking_price: z.number().int().nonnegative(),
+  tech_stack: z.array(z.string().trim().min(1)).default([]),
+  founder_pitch: z.string().trim().nullable(),
 });
 
-const ResearchDeckSchema = z.array(ResearchDeckSlideSchema).length(6);
+const UnifiedAnalysisSchema = z.object({
+  truthSummary: z.string().trim().min(1).max(2500),
+  marketResearchFindings: z.string().trim().min(1).max(3500),
+  buyerCaseSummary: z.string().trim().min(1).max(2500),
+  qualityScore: z.preprocess((value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return value;
+    }
+    return Math.max(1, Math.min(10, Math.round(numeric)));
+  }, z.number().int().min(1).max(10)),
+});
 
-const PersistedFinalDeckSlideSchema = z.object({
+const UnifiedSlideSchema = z.object({
   slideNumber: z.number().int().min(1).max(6),
   theme: z.string().trim().min(1).max(240),
-  headline: z.string().trim().min(1).max(400),
-  subheadline: z.string().trim().min(1).max(400),
-  dataPoints: z.array(z.string().trim().min(1).max(500)).min(1),
-  imagePrompt: z.string().trim().min(1).max(4000),
-  backgroundImageBase64: z.string().trim().min(1),
+  headline: z.string().trim().min(1).max(420),
+  subheadline: z.string().trim().min(1).max(520),
+  dataPoints: z.array(z.string().trim().min(1).max(500)).min(2).max(3),
+  nanoBananaPrompt: z.string().trim().min(1).max(8000),
 });
 
-const PersistedFinalDeckSchema = z.object({
-  slides: z.array(PersistedFinalDeckSlideSchema).length(6),
+const UnifiedDeckSchema = z.object({
+  analysis: UnifiedAnalysisSchema,
+  slides: z.array(UnifiedSlideSchema).length(6).superRefine((slides, ctx) => {
+    slides.forEach((slide, index) => {
+      if (slide.slideNumber !== index + 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `slideNumber must be ${index + 1} at index ${index}.`,
+        });
+      }
+    });
+  }),
 });
 
-const GeminiPhase3SlideSchema = z.object({
-  slideNumber: z.number().int().min(1).max(20),
-  title: z.string().trim().min(1).max(180),
-  bodyText: z.string().trim().min(1).max(6000),
-  metricsToHighlight: z.array(z.string().trim().min(1).max(180)).max(12).default([]),
-  imagePrompt: z.string().trim().min(1).max(4000),
-});
-
-const GeminiPhase3DeckSchema = z.object({
-  themeDeduced: z.string().trim().min(1).max(240),
-  slides: z.array(GeminiPhase3SlideSchema).length(8),
-});
-
-const FinalDeckSlideSchema = z.object({
-  slideNumber: z.number().int().min(1).max(20),
-  title: z.string().trim().min(1).max(180),
-  bodyText: z.string().trim().min(1).max(6000),
-  metricsToHighlight: z.array(z.string().trim().min(1).max(180)).max(12).default([]),
-  imagePrompt: z.string().trim().min(1).max(4000),
+const FinalDeckSlideSchema = UnifiedSlideSchema.extend({
   backgroundImageBase64: z.string().trim().min(1),
 });
 
 const FinalDeckSchema = z.object({
-  themeDeduced: z.string().trim().min(1).max(240),
-  slides: z.array(FinalDeckSlideSchema).length(8),
+  analysis: UnifiedAnalysisSchema,
+  slides: z.array(FinalDeckSlideSchema).length(6).superRefine((slides, ctx) => {
+    slides.forEach((slide, index) => {
+      if (slide.slideNumber !== index + 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `slideNumber must be ${index + 1} at index ${index}.`,
+        });
+      }
+    });
+  }),
 });
 
-const GeneratedSlideSchema = z.object({
-  slideNumber: z.number().int().min(1).max(20),
-  title: z.string().trim().min(2).max(140),
-  copy: z.string().trim().min(20).max(3200),
-  metricsToHighlight: z.array(z.string().trim().min(1).max(140)).max(8).default([]),
-  nanoBananaPrompt: z.string().trim().min(20).max(2000),
-});
+const UNIFIED_DECK_SYSTEM_INSTRUCTION = `You are a dual-role AI:
+1) an elite M&A due diligence analyst
+2) a high-end editorial art director
 
-const GeminiDeckSchema = z.object({
-  slides: z.array(GeneratedSlideSchema).min(1).max(20),
-});
+Use the provided raw intelligence payload as the core source of truth.
+Use Google Search grounding to verify market context, current TAM framing, and relevant competitors.
+Do not invent traction, moat, pricing logic, or market facts.
+Stay honest about weak numbers and uncertainty.
 
-const StoredDeckSlideSchema = GeneratedSlideSchema.extend({
-  imageUrl: z.string().trim().url().optional(),
-});
+Write 6 buyer-facing slides in plain English for a smart 10th grader.
+Use short sentences. Keep one clear point per slide.
+Avoid banker jargon, consultant jargon, startup buzzwords, hype, and robotic phrasing.
 
-const StoredDeckSchema = z.object({
-  generatedAt: z.string().datetime().optional(),
-  model: z.string().trim().min(2).max(200).optional(),
-  imageModel: z.string().trim().min(2).max(200).optional(),
-  slides: z.array(StoredDeckSlideSchema).min(1),
-});
+Content quality rules:
+- Prioritize clarity over clever language.
+- Keep the product narrative ownable and specific, not generic.
+- Describe the actual interaction model, not broad "community" claims.
+- When relevant, explain private space, owned audience, trust-first interaction, focused participation, and intentional smaller groups.
+- Keep weak metrics, weak moat, and weak pricing logic visible, but do not use self-sabotaging phrasing when a fair truthful framing exists.
+- Reduce repetition of "codebase", "foundation", "asset", "built shell", and "ready-made platform". These ideas can appear, but must not dominate the deck.
+- Do not reuse the same framing across too many slides. Vary by product interaction, user behavior, buyer fit, activation path, and niche advantage.
+- Avoid language that is technically honest but commercially deflating unless strictly required by facts.
+- Reduce or avoid phrases like: blank-slate, empty container, day zero, nothing there, no reason to care, financially meaningless, dead product.
 
-const SENDER_DECK_SEQUENCE = [
-  'Title',
-  'Market Problem',
-  'Product Solution',
-  'Business Model',
-  'Traction & Verification',
-  'Financial Profile',
-  'Acquisition Terms',
-  'Closing Thesis',
-] as const;
+Slide-specific copy guidance:
+- Slide 1 (Identity): define what kind of product this is, what kind of interaction it supports, and why it is different from generic social/community software. Make it distinctive and ownable without hype.
+- Slide 4 (Moat/Product Truth): explain the strongest believable product edge in a product-native way, why that design might matter, and what is still weak or unproven. Do not overstate defensibility.
+- Slide 6 (Path to Value): give a specific and believable path to value. Clarify the first real wedge, the kind of operator who can unlock it, and the practical next step that turns product usage into a business.
+
+For visuals, provide one Nano Banana prompt per slide using natural-language art direction.
+Visual philosophy:
+- premium, minimal, cinematic editorialism
+- financial honesty
+- 60/40 asymmetry
+- left side pure dark negative space for text
+- one strong symbolic visual anchor per slide
+- image supports the slide and does not compete with it
+
+Hard bans:
+- no fake charts
+- no fake dashboards
+- no fake UI
+- no pseudo-infographics
+- no generic hero-object filler
+- no noisy clutter under the text zone
+
+Output strict JSON only, matching the required schema exactly.`;
+
+const UNIFIED_DECK_USER_PROMPT = `Generate one unified deck package from the input payload.
+
+Requirements:
+- Return one analysis object and exactly 6 slides.
+- Slide order must be 1 through 6.
+- dataPoints must contain exactly 2 or 3 short bullets.
+- Keep buyer logic grounded and honest.
+- Use grounded market context, but do not overstate confidence.
+- Keep wording commercially fair: honest but not needlessly punishing.
+- Keep Slide 1 specific and ownable, not generic.
+- Make Slide 4 deeper and more product-native, with clear edge and clear weakness.
+- Make Slide 6 concrete with a realistic first wedge, operator fit, and practical next step.
+- Avoid repetitive "codebase/foundation/asset" framing across multiple slides.
+- Make Nano Banana prompts scene-based, material-aware, composition-aware, lighting-aware, and mood-aware.
+- Enforce 16:9 framing with left-side dark text-safe space and right-side focal composition.
+- Do not include fake business graphics, fake numbers, or pseudo-dashboard elements.
+- Output JSON only.`;
+
+const UNIFIED_DECK_RESPONSE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  required: ['analysis', 'slides'],
+  properties: {
+    analysis: {
+      type: SchemaType.OBJECT,
+      required: ['truthSummary', 'marketResearchFindings', 'buyerCaseSummary', 'qualityScore'],
+      properties: {
+        truthSummary: { type: SchemaType.STRING },
+        marketResearchFindings: { type: SchemaType.STRING },
+        buyerCaseSummary: { type: SchemaType.STRING },
+        qualityScore: { type: SchemaType.INTEGER },
+      },
+    },
+    slides: {
+      type: SchemaType.ARRAY,
+      minItems: 6,
+      maxItems: 6,
+      items: {
+        type: SchemaType.OBJECT,
+        required: ['slideNumber', 'theme', 'headline', 'subheadline', 'dataPoints', 'nanoBananaPrompt'],
+        properties: {
+          slideNumber: { type: SchemaType.INTEGER },
+          theme: { type: SchemaType.STRING },
+          headline: { type: SchemaType.STRING },
+          subheadline: { type: SchemaType.STRING },
+          dataPoints: {
+            type: SchemaType.ARRAY,
+            minItems: 2,
+            maxItems: 3,
+            items: { type: SchemaType.STRING },
+          },
+          nanoBananaPrompt: { type: SchemaType.STRING },
+        },
+      },
+    },
+  },
+} as const;
 
 const getAssetId = (req: any): string => {
   const raw = req?.query?.assetId;
@@ -140,219 +225,21 @@ const dedupeNonEmpty = (values: Array<unknown>): string[] => {
   return result;
 };
 
-const formatUsd = (cents: number): string =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(Math.max(0, Number(cents ?? 0)) / 100);
-
-const formatPercent = (bps: number | null): string => {
-  if (typeof bps !== 'number' || !Number.isFinite(bps)) {
-    return 'N/A';
-  }
-  return `${(bps / 100).toFixed(1)}%`;
-};
-
-type DeckContext = {
-  assetId: string;
-  assetName: string;
-  tagline: string;
-  pitch: string;
-  problem: string;
-  solution: string;
-  description: string;
-  category: string;
-  websiteUrl: string;
-  askingPriceCents: number;
-  mrrCents: number;
-  profitMarginBps: number;
-  traffic30d: number;
-  expenses30dCents: number;
-  netProfit30dCents: number;
-  techStack: string[];
-};
-
-type DeckSlide = z.infer<typeof StoredDeckSlideSchema>;
-
-type DeckPayload = {
-  generatedAt: string;
-  model: string;
-  imageModel: string;
-  slides: DeckSlide[];
-};
-
-const createFallbackSlides = (context: DeckContext): DeckSlide[] => {
-  const metrics = {
-    asking: `Ask: ${formatUsd(context.askingPriceCents)}`,
-    mrr: `Verified MRR: ${formatUsd(context.mrrCents)}`,
-    margin: `Margin: ${formatPercent(context.profitMarginBps)}`,
-    traffic: `Traffic (30D): ${context.traffic30d.toLocaleString()}`,
-    expenses: `Expenses (30D): ${formatUsd(context.expenses30dCents)}`,
-    profit: `Net Profit (30D): ${formatUsd(context.netProfit30dCents)}`,
-  };
-
-  const slides: DeckSlide[] = [
-    {
-      slideNumber: 1,
-      title: `${context.assetName} Acquisition Opportunity`,
-      copy:
-        `${context.assetName} is a live ${context.category} asset listed on VibeJam. `
-        + `This sender deck presents the verified traction, financial profile, and acquisition terms for a high-conviction buyer review.`,
-      metricsToHighlight: [metrics.asking, metrics.mrr, metrics.margin],
-      nanoBananaPrompt:
-        `Cinematic dark-mode venture capital presentation background, premium SaaS acquisition theme, neon cyan and gold accents, subtle grid, 16:9, ultra-detailed, no text.`,
-    },
-    {
-      slideNumber: 2,
-      title: 'Market Problem',
-      copy: context.problem || `${context.category} buyers and teams face fragmented workflows, high switching costs, and poor tooling reliability.`,
-      metricsToHighlight: [context.category, metrics.traffic],
-      nanoBananaPrompt:
-        `Moody enterprise workflow pain visualization, dark modern UI fragments, bottleneck concept, cinematic lighting, 16:9, no text.`,
-    },
-    {
-      slideNumber: 3,
-      title: 'Product Solution',
-      copy:
-        context.solution
-        || context.pitch
-        || context.description
-        || `${context.assetName} delivers a focused solution with measurable retention and practical workflow improvements.`,
-      metricsToHighlight: [metrics.mrr, metrics.margin],
-      nanoBananaPrompt:
-        `Futuristic product interface composition, dark premium SaaS dashboard, glowing success indicators, cinematic depth, 16:9, no text.`,
-    },
-    {
-      slideNumber: 4,
-      title: 'Business Model',
-      copy:
-        `${context.assetName} monetizes through recurring revenue with clean unit economics and room for pricing optimization post-acquisition.`,
-      metricsToHighlight: [metrics.mrr, metrics.expenses, metrics.profit],
-      nanoBananaPrompt:
-        `Elegant financial model abstraction with charts and recurring revenue motifs, dark luxury style, neon accents, 16:9, no text.`,
-    },
-    {
-      slideNumber: 5,
-      title: 'Traction & Verification',
-      copy:
-        `VibeJam verifies traction directly from connected providers and operating signals, giving buyers an API-grounded view of business momentum.`,
-      metricsToHighlight: [metrics.mrr, metrics.traffic, metrics.margin],
-      nanoBananaPrompt:
-        `High-trust verification control center visual, dark cybersecurity aesthetics, glowing validation badges, 16:9, no text.`,
-    },
-    {
-      slideNumber: 6,
-      title: 'Financial Profile',
-      copy:
-        `${context.assetName} currently tracks ${formatUsd(context.mrrCents)} in MRR with `
-        + `${formatPercent(context.profitMarginBps)} profitability and disciplined monthly operating costs.`,
-      metricsToHighlight: [metrics.mrr, metrics.expenses, metrics.profit, metrics.margin],
-      nanoBananaPrompt:
-        `Institutional-grade financial dashboard scene, dark marble and glass textures, emerald KPI lines, cinematic 16:9, no text.`,
-    },
-    {
-      slideNumber: 7,
-      title: 'Acquisition Terms',
-      copy:
-        `Seller is seeking ${formatUsd(context.askingPriceCents)} for full ownership transfer. `
-        + `Transaction can proceed via VibeJam Deal Room with LOI/APA flow and Escrow.com settlement.`,
-      metricsToHighlight: [metrics.asking, 'Escrow.com supported'],
-      nanoBananaPrompt:
-        `Premium M&A deal room aesthetic, secure escrow vault motif, dark cinematic environment with gold highlights, 16:9, no text.`,
-    },
-    {
-      slideNumber: 8,
-      title: 'Closing Thesis',
-      copy:
-        `${context.assetName} offers an attractive buyout profile: proven monetization, verified operating data, and a structured close path for serious acquirers.`,
-      metricsToHighlight: [metrics.asking, metrics.mrr, metrics.margin],
-      nanoBananaPrompt:
-        `Triumphant acquisition finale visual, dark premium stage lighting, subtle upward motion graphics style, 16:9, no text.`,
-    },
-  ];
-
-  return slides;
-};
-
-const normalizeSlides = (candidate: z.infer<typeof GeneratedSlideSchema>[], fallback: DeckSlide[]): DeckSlide[] =>
-  SENDER_DECK_SEQUENCE.map((defaultTitle, index) => {
-    const source = candidate[index] ?? fallback[index];
-    const fallbackSlide = fallback[index];
-    const metrics = Array.isArray(source?.metricsToHighlight)
-      ? source.metricsToHighlight.map((item) => String(item ?? '').trim()).filter(Boolean).slice(0, 8)
-      : fallbackSlide.metricsToHighlight;
-
-    return {
-      slideNumber: index + 1,
-      title: String(source?.title ?? '').trim() || defaultTitle,
-      copy: String(source?.copy ?? '').trim() || fallbackSlide.copy,
-      metricsToHighlight: metrics.length > 0 ? metrics : fallbackSlide.metricsToHighlight,
-      nanoBananaPrompt: String(source?.nanoBananaPrompt ?? '').trim() || fallbackSlide.nanoBananaPrompt,
-      imageUrl: fallbackSlide.imageUrl,
-    };
-  });
-
-const buildGeminiPrompt = (context: DeckContext): string => {
-  const payload = {
-    asset: {
-      id: context.assetId,
-      name: context.assetName,
-      tagline: context.tagline,
-      category: context.category,
-      websiteUrl: context.websiteUrl,
-      techStack: context.techStack,
-    },
-    narrative: {
-      pitch: context.pitch,
-      problem: context.problem,
-      solution: context.solution,
-      description: context.description,
-    },
-    metrics: {
-      askingPriceUsd: formatUsd(context.askingPriceCents),
-      mrrUsd: formatUsd(context.mrrCents),
-      profitMarginPercent: formatPercent(context.profitMarginBps),
-      traffic30d: context.traffic30d,
-      expenses30dUsd: formatUsd(context.expenses30dCents),
-      netProfit30dUsd: formatUsd(context.netProfit30dCents),
-    },
-    requiredSlideSequence: SENDER_DECK_SEQUENCE,
-  };
-
-  return [
-    'You are a top-tier M&A investment banker and elite pitch strategist.',
-    'Build an 8-slide Sender Deck for acquisition outreach.',
-    'Output STRICT JSON only. No markdown. No explanation outside JSON.',
-    'Follow this exact schema:',
-    '{"slides":[{"slideNumber":1,"title":"...","copy":"...","metricsToHighlight":["..."],"nanoBananaPrompt":"..."}]}',
-    'Rules:',
-    '- Exactly 8 slides in the exact required sequence.',
-    '- Sender deck copy should be detailed, persuasive, and buyer-facing.',
-    '- metricsToHighlight should be crisp and acquisition-relevant.',
-    '- nanoBananaPrompt must be highly descriptive for cinematic dark-mode visuals and always include 16:9 composition intent.',
-    '- Do not invent unavailable facts. Stay aligned with input.',
-    `INPUT:\n${JSON.stringify(payload, null, 2)}`,
-  ].join('\n');
-};
-
-const resolveGoogleImageApiKey = (): string => {
-  const key =
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim()
-    || process.env.NANO_BANANA_API_KEY?.trim()
-    || process.env.GEMINI_API_KEY?.trim();
-
-  return key || '';
-};
-
-const parseImagenBase64 = (payload: any): string | null => {
-  const predictions = Array.isArray(payload?.predictions) ? payload.predictions : [];
-  const first = predictions[0];
-  const encoded = typeof first?.bytesBase64Encoded === 'string' ? first.bytesBase64Encoded.trim() : '';
-  if (!encoded) {
+const normalizeWebsiteUrl = (input: unknown): string | null => {
+  if (typeof input !== 'string') {
     return null;
   }
-  return encoded;
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^[a-z0-9.-]+\.[a-z]{2,}/i.test(trimmed)) {
+    return `https://${trimmed}`;
+  }
+  return null;
 };
 
 const stripJsonFences = (raw: string): string => {
@@ -360,17 +247,255 @@ const stripJsonFences = (raw: string): string => {
   if (!trimmed.startsWith('```')) {
     return trimmed;
   }
-
   return trimmed
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '')
     .trim();
 };
 
+const extractWebsiteText = (html: string): string => {
+  const withoutScripts = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+
+  const text = withoutScripts
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return text.slice(0, 12000);
+};
+
+const fetchWebsiteContext = async (
+  websiteUrl: string | null,
+): Promise<{ website_context_text: string | null; website_context_note: string }> => {
+  if (!websiteUrl) {
+    return {
+      website_context_text: null,
+      website_context_note: 'No website URL provided.',
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const response = await fetch(websiteUrl, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+      },
+    });
+
+    if (!response.ok) {
+      return {
+        website_context_text: null,
+        website_context_note: `Website fetch unavailable: HTTP ${response.status}.`,
+      };
+    }
+
+    const contentType = String(response.headers.get('content-type') ?? '').toLowerCase();
+    const raw = await response.text();
+    if (!raw.trim()) {
+      return {
+        website_context_text: null,
+        website_context_note: 'Website fetch succeeded but page text was empty.',
+      };
+    }
+
+    const source = contentType.includes('html') ? raw : raw.slice(0, 150000);
+    const extracted = extractWebsiteText(source);
+    if (!extracted) {
+      return {
+        website_context_text: null,
+        website_context_note: 'Website fetch succeeded but visible text extraction was empty.',
+      };
+    }
+
+    return {
+      website_context_text: extracted,
+      website_context_note: `Website context extracted from ${websiteUrl}.`,
+    };
+  } catch (error) {
+    return {
+      website_context_text: null,
+      website_context_note: `Website text unavailable: ${sanitizeErrorDetails(error)}`,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const parseImageBase64 = (payload: any): string | null => {
+  const predictions = Array.isArray(payload?.predictions) ? payload.predictions : [];
+  const predictionEncoded = typeof predictions[0]?.bytesBase64Encoded === 'string'
+    ? predictions[0].bytesBase64Encoded.trim()
+    : '';
+  if (predictionEncoded) {
+    return predictionEncoded;
+  }
+
+  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+  for (const candidate of candidates) {
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    for (const part of parts) {
+      const inlineData = part?.inlineData;
+      if (
+        inlineData
+        && typeof inlineData?.data === 'string'
+        && inlineData.data.trim()
+        && typeof inlineData?.mimeType === 'string'
+        && inlineData.mimeType.toLowerCase().startsWith('image/')
+      ) {
+        return inlineData.data.trim();
+      }
+    }
+  }
+
+  return null;
+};
+
+const parseUnifiedDeckJson = (rawText: string): z.infer<typeof UnifiedDeckSchema> => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripJsonFences(rawText));
+  } catch (error) {
+    throw new Error(`Gemini 3.1 Pro structured-output parse failure: invalid JSON. ${sanitizeErrorDetails(error)}`);
+  }
+
+  const validated = UnifiedDeckSchema.safeParse(parsed);
+  if (!validated.success) {
+    throw new Error(
+      `Gemini 3.1 Pro structured-output parse failure: ${validated.error.issues[0]?.message ?? 'Invalid schema.'}`,
+    );
+  }
+  return validated.data;
+};
+
+const buildRawIntelligencePayload = (asset: any, jam: any, latestSnapshot: any, websiteContext: {
+  website_context_text: string | null;
+  website_context_note: string;
+}) => {
+  const verifiedMrrCents = Math.max(
+    clampNonNegativeInt(asset.mrr_cents),
+    clampNonNegativeInt(latestSnapshot?.mrr_cents),
+  );
+
+  const last30dRevenueCents = Math.max(
+    clampNonNegativeInt(asset.last30d_revenue_cents),
+    clampNonNegativeInt(latestSnapshot?.revenue_cents),
+  );
+
+  const expenses30dCents = Math.max(
+    clampNonNegativeInt(asset.trailing_30d_expenses_cents),
+    clampNonNegativeInt(jam?.monthly_expenses_cents),
+  );
+
+  const netProfit30dCents = Math.max(
+    clampNonNegativeInt(asset.trailing_30d_profit_cents),
+    verifiedMrrCents - expenses30dCents,
+  );
+
+  const computedMarginBps = verifiedMrrCents > 0 ? Math.round((netProfit30dCents / verifiedMrrCents) * 10_000) : 0;
+
+  const candidate = {
+    project_name: String(asset.title ?? asset.name ?? 'Untitled Asset').trim() || 'Untitled Asset',
+    website_url: normalizeWebsiteUrl(asset.website_url) ?? normalizeWebsiteUrl(jam?.website_url),
+    website_context_text: websiteContext.website_context_text,
+    website_context_note: websiteContext.website_context_note,
+    category: String(asset.category ?? '').trim() || null,
+    verified_mrr: verifiedMrrCents,
+    last_30d_revenue: last30dRevenueCents,
+    profit_margin: clampNonNegativeInt(asset.profit_margin_bps) || computedMarginBps,
+    monthly_expenses: expenses30dCents,
+    active_users: clampNonNegativeInt(asset.monthly_unique_visitors),
+    asking_price: clampNonNegativeInt(asset.asking_price_cents),
+    tech_stack: dedupeNonEmpty([...(asset.tech_stack ?? []), ...(jam?.tech_stack ?? [])]),
+    founder_pitch: String(jam?.pitch ?? asset.tagline ?? asset.description ?? '').trim() || null,
+  };
+
+  return RawIntelligencePayloadSchema.safeParse(candidate);
+};
+
+const generateSlideBackgroundImage = async ({
+  apiKey,
+  model,
+  prompt,
+  slideNumber,
+}: {
+  apiKey: string;
+  model: string;
+  prompt: string;
+  slideNumber: number;
+}): Promise<{ slideNumber: number; backgroundImageBase64: string }> => {
+  const isGeminiImageModel = model.startsWith('gemini-');
+  const endpoint = isGeminiImageModel
+    ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:predict?key=${encodeURIComponent(apiKey)}`;
+
+  const body = isGeminiImageModel
+    ? JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: prompt }],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ['TEXT', 'IMAGE'],
+        },
+      })
+    : JSON.stringify({
+        instances: [{ prompt }],
+        parameters: {
+          sampleCount: 1,
+          aspectRatio: '16:9',
+        },
+      });
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body,
+  });
+
+  const raw = await response.text();
+  let parsed: any = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+
+  if (!response.ok) {
+    const details = (parsed && JSON.stringify(parsed).slice(0, 500)) || raw.slice(0, 500) || 'No response body.';
+    throw new Error(`Slide ${slideNumber} image generation failed: API ${response.status} ${details}`);
+  }
+
+  const backgroundImageBase64 = parseImageBase64(parsed);
+  if (!backgroundImageBase64) {
+    throw new Error(`Slide ${slideNumber} image generation failed: missing bytesBase64Encoded.`);
+  }
+
+  return { slideNumber, backgroundImageBase64 };
+};
+
 export default async function handler(req: any, res: any) {
   try {
     const method = getMethod(req);
-    if (method !== 'POST' && method !== 'GET') {
+    if (method !== 'GET' && method !== 'POST') {
       return methodNotAllowed(res, ['GET', 'POST']);
     }
 
@@ -394,15 +519,17 @@ export default async function handler(req: any, res: any) {
           .maybeSingle();
 
       let assetResult = await fetchDeckAsset(
-        'id, owner_user_id, pitch_decks, is_listed, listing_status, status, visibility',
+        'id, owner_user_id, generated_deck_json, pitch_decks, is_listed, listing_status, status, visibility',
       );
 
       if (assetResult.error && isRecoverableSchemaError(assetResult.error)) {
-        assetResult = await fetchDeckAsset('id, owner_user_id, pitch_decks, is_listed, listing_status, visibility');
+        assetResult = await fetchDeckAsset(
+          'id, owner_user_id, generated_deck_json, pitch_decks, is_listed, listing_status, visibility',
+        );
       }
 
       if (assetResult.error && isRecoverableSchemaError(assetResult.error)) {
-        assetResult = await fetchDeckAsset('id, owner_user_id, pitch_decks, is_listed');
+        assetResult = await fetchDeckAsset('id, owner_user_id, generated_deck_json, pitch_decks, is_listed');
       }
 
       if (assetResult.error) {
@@ -429,21 +556,15 @@ export default async function handler(req: any, res: any) {
         }
       }
 
-      const existingDecks = StoredDeckSchema.safeParse((asset as any).pitch_decks ?? null);
-      if (!existingDecks.success) {
+      const deck = (asset as any).generated_deck_json ?? (asset as any).pitch_decks ?? null;
+      if (!deck) {
         return sendJson(res, 404, {
           error: 'Pitch deck has not been generated yet.',
           details: 'Generate this deck from the seller console first.',
         });
       }
 
-      return sendJson(res, 200, {
-        data: {
-          assetId: String(asset.id),
-          reused: true,
-          pitchDecks: existingDecks.data,
-        },
-      });
+      return sendJson(res, 200, { deck });
     }
 
     const user = await getAuthenticatedUser(req);
@@ -492,38 +613,23 @@ export default async function handler(req: any, res: any) {
     if (assetError) {
       if (isRecoverableSchemaError(assetError)) {
         return sendJson(res, 503, {
-          error: 'Pitch deck schema is not ready yet.',
+          error: 'Asset fetch failure.',
           details: 'Run the latest Supabase migration to enable pitch deck storage.',
         });
       }
-      throw assetError;
+      return sendJson(res, 500, {
+        error: 'Asset fetch failure.',
+        details: sanitizeErrorDetails(assetError),
+      });
     }
 
     if (!asset || asset.owner_user_id !== user.id) {
       return sendJson(res, 404, { error: 'Marketplace asset not found.' });
     }
 
-    const existingGeneratedDeck = FinalDeckSchema.safeParse((asset as any).generated_deck_json ?? null);
-    if (!payload.data.forceRegenerate && existingGeneratedDeck.success) {
-      return sendJson(res, 200, {
-        data: {
-          assetId: String(asset.id),
-          reused: true,
-          pitchDecks: existingGeneratedDeck.data,
-        },
-        deck: existingGeneratedDeck.data,
-      });
-    }
-
-    const existingDecks = StoredDeckSchema.safeParse(asset.pitch_decks ?? null);
-    if (!payload.data.forceRegenerate && existingDecks.success) {
-      return sendJson(res, 200, {
-        data: {
-          assetId: String(asset.id),
-          reused: true,
-          pitchDecks: existingDecks.data,
-        },
-      });
+    const existingFinalDeck = FinalDeckSchema.safeParse((asset as any).generated_deck_json ?? null);
+    if (!payload.data.forceRegenerate && existingFinalDeck.success) {
+      return sendJson(res, 200, { deck: existingFinalDeck.data });
     }
 
     const [{ data: jam, error: jamError }, { data: snapshots, error: snapshotsError }] = await Promise.all([
@@ -544,301 +650,183 @@ export default async function handler(req: any, res: any) {
     ]);
 
     if (jamError && !isRecoverableSchemaError(jamError)) {
-      throw jamError;
+      return sendJson(res, 500, {
+        error: 'Asset fetch failure.',
+        details: sanitizeErrorDetails(jamError),
+      });
     }
+
     if (snapshotsError && !isRecoverableSchemaError(snapshotsError)) {
-      throw snapshotsError;
+      return sendJson(res, 500, {
+        error: 'Asset fetch failure.',
+        details: sanitizeErrorDetails(snapshotsError),
+      });
     }
 
     const latestSnapshot = Array.isArray(snapshots) && snapshots.length > 0 ? snapshots[0] : null;
 
-    const verifiedMrrCents = Math.max(
-      clampNonNegativeInt(asset.mrr_cents),
-      clampNonNegativeInt(latestSnapshot?.mrr_cents),
-    );
+    const websiteUrl = normalizeWebsiteUrl(asset.website_url) ?? normalizeWebsiteUrl(jam?.website_url);
+    const websiteContext = await fetchWebsiteContext(websiteUrl);
 
-    const last30dRevenueCents = Math.max(
-      clampNonNegativeInt((asset as any).last30d_revenue_cents),
-      clampNonNegativeInt(latestSnapshot?.revenue_cents),
-    );
+    const rawPayloadParse = buildRawIntelligencePayload(asset, jam, latestSnapshot, websiteContext);
+    if (!rawPayloadParse.success) {
+      return sendJson(res, 500, {
+        error: 'Payload assembly failure.',
+        details: rawPayloadParse.error.issues[0]?.message ?? 'Raw intelligence payload is invalid.',
+      });
+    }
 
-    const expenses30dCents = Math.max(
-      clampNonNegativeInt(asset.trailing_30d_expenses_cents),
-      clampNonNegativeInt(jam?.monthly_expenses_cents),
-    );
-
-    const netProfit30dCents = Math.max(
-      clampNonNegativeInt(asset.trailing_30d_profit_cents),
-      verifiedMrrCents - expenses30dCents,
-    );
-
-    const computedMarginBps = verifiedMrrCents > 0 ? Math.round((netProfit30dCents / verifiedMrrCents) * 10_000) : 0;
-
-    const rawIntelligencePayload = {
-      project_name: String(asset.title ?? asset.name ?? 'Untitled Asset').trim() || 'Untitled Asset',
-      website_url: String(asset.website_url ?? jam?.website_url ?? '').trim() || null,
-      category: String(asset.category ?? '').trim() || null,
-      verified_mrr: verifiedMrrCents,
-      last_30d_revenue: last30dRevenueCents,
-      profit_margin: clampNonNegativeInt(asset.profit_margin_bps) || computedMarginBps,
-      monthly_expenses: expenses30dCents,
-      active_users: clampNonNegativeInt(asset.monthly_unique_visitors),
-      asking_price: clampNonNegativeInt(asset.asking_price_cents),
-      tech_stack: dedupeNonEmpty([...(asset.tech_stack ?? []), ...(jam?.tech_stack ?? [])]),
-      founder_pitch: String(jam?.pitch ?? asset.tagline ?? asset.description ?? '').trim() || null,
-    };
-
-    const rawIntelligencePayloadJson = JSON.stringify(rawIntelligencePayload, null, 2);
+    const rawIntelligencePayload = rawPayloadParse.data;
 
     const apiKey = process.env.GOOGLE_AI_MASTER_KEY?.trim();
     if (!apiKey) {
       return sendJson(res, 500, { error: 'GOOGLE_AI_MASTER_KEY is not configured.' });
     }
 
-    const systemPrompt = `You are an elite Private Equity Analyst and M&A Due Diligence AI. Your objective is to take raw, minimal data provided by a startup founder, autonomously research the gaps using Google Search, and output a highly analytical, 6-slide Acquisition Pitch Deck.
-
-Do NOT use marketing fluff (e.g., "revolutionary", "magic"). Use clinical, investment-grade business terminology (LTV, CAC, Moat, Arbitrage, EBITDA).
-
-### RAW INTELLIGENCE PAYLOAD (From VibeJam API):
-${rawIntelligencePayloadJson}
-
-### YOUR REQUIRED CHAIN OF THOUGHT & RESEARCH:
-1. SCRAPE: Analyze the \`website_url\` and \`founder_pitch\` to strictly define what this product does.
-2. FINANCIAL MATH: Calculate the Annualized Run Rate (ARR) based on MRR. Calculate the Valuation Multiple (Asking Price / ARR).
-3. MARKET SIZING: Use your real-time search capabilities to estimate the Total Addressable Market (TAM) for the \`category\` and identify two direct competitors.
-4. TECH ANALYSIS: Look at the \`tech_stack\` and define why this specific stack is scalable or defensible.
-
-### OUTPUT SCHEMA:
-Return ONLY a valid JSON array of 6 slide objects. Follow this exact structure:
-
-[
-  {
-    "slide_number": 1,
-    "theme": "The Asset (Executive Summary)",
-    "headline": "[Project Name] - [Precise 3-word category description, e.g., B2B Legal API]",
-    "subheadline": "Verified at $[ARR] ARR | [Margin]% Margin | [Calculated Valuation Multiple]x Multiple",
-    "data_points": [
-      "Strict definition of the product derived from the URL scrape.",
-      "The core value proposition translated from the founder's pitch."
-    ],
-    "nano_banana_prompt": "A brutalist industrial macro shot representing [Product Category], Pitch Black and Safety Yellow (#FEE101), heavy film grain, technical blueprint overlay, 8k --ar 16:9"
-  },
-  {
-    "slide_number": 2,
-    "theme": "Financial Health & Unit Economics",
-    "headline": "Zero-BS Financial Verification",
-    "subheadline": "API-Verified via VibeJam Escrow Protocol.",
-    "data_points": [
-      "Verified MRR: $[MRR] | TTM Revenue Projection: $[ARR]",
-      "Monthly OPEX: $[Expenses] | Net Profit Margin: [Margin]%",
-      "Active User Base: [Active Users]"
-    ],
-    "nano_banana_prompt": "Abstract brutalist data visualization of financial growth charts, thick yellow API lines on pitch black background, monospace data overlay, heavy noise --ar 16:9"
-  },
-  {
-    "slide_number": 3,
-    "theme": "Market Dynamics & TAM",
-    "headline": "The Market Gap in [Category]",
-    "subheadline": "Estimated TAM: $[Autonomously Researched TAM Value]",
-    "data_points": [
-      "Detail the specific industry pain point this product solves.",
-      "Explain the macro-trend driving demand in this sector based on current market research."
-    ],
-    "nano_banana_prompt": "Brutalist editorial illustration of a targeted radar or crosshair locking onto a target, pitch black and safety yellow, technical UI, grainy --ar 16:9"
-  },
-  {
-    "slide_number": 4,
-    "theme": "The Defensible Moat (Infrastructure)",
-    "headline": "Technical Architecture",
-    "subheadline": "Built for scale with [Tech Stack].",
-    "data_points": [
-      "Analyze the [Tech Stack] and explain its specific scalability/cost advantages.",
-      "Identify the 'unforkable' component or IP moat of the project."
-    ],
-    "nano_banana_prompt": "High-contrast geometric diagram of server nodes, hacker terminal aesthetic, yellow connection lines on black background, brutalist --ar 16:9"
-  },
-  {
-    "slide_number": 5,
-    "theme": "Competitive Positioning",
-    "headline": "Positioning Matrix",
-    "subheadline": "Disrupting [Researched Competitor 1] and [Researched Competitor 2].",
-    "data_points": [
-      "How this asset wins against [Competitor 1] (e.g., UX, Price, Niche focus).",
-      "How this asset wins against [Competitor 2]."
-    ],
-    "nano_banana_prompt": "Minimalist aggressive graphic of a glowing yellow wedge splitting a solid black block, industrial power dynamic, high noise --ar 16:9"
-  },
-  {
-    "slide_number": 6,
-    "theme": "Asymmetric Upside (Growth Levers)",
-    "headline": "The Post-Acquisition Playbook",
-    "subheadline": "Immediate arbitrage opportunities for the new owner.",
-    "data_points": [
-      "Suggest Growth Lever 1 based on the product's nature (e.g., SEO expansion, Programmatic Ads).",
-      "Suggest Growth Lever 2 (e.g., Pricing optimization, B2B enterprise tier)."
-    ],
-    "nano_banana_prompt": "Brutalist icon of a heavy industrial switch flipped to the ON position, glowing safety yellow on pitch black, UI graphic, tactile grain --ar 16:9"
-  }
-]`;
-
-    const configuredGeminiModel = String(process.env.GEMINI_MODEL ?? '')
-      .trim()
-      .toLowerCase();
-    const geminiModel =
-      configuredGeminiModel === 'gemini-3.1-pro'
+    const configuredTextModel = String(process.env.GEMINI_MODEL ?? '').trim().toLowerCase();
+    const textModelName =
+      configuredTextModel === 'gemini-3.1-pro'
         ? 'gemini-3.1-pro-preview'
-        : configuredGeminiModel || 'gemini-3.1-pro-preview';
+        : configuredTextModel || 'gemini-3.1-pro-preview';
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    let deckDraft: z.infer<typeof ResearchDeckSchema>;
-    try {
-      const model = genAI.getGenerativeModel({ model: geminiModel });
-      const result = await model.generateContent(systemPrompt);
-      const rawText = result.response.text();
-      deckDraft = ResearchDeckSchema.parse(JSON.parse(stripJsonFences(rawText)));
-    } catch (generationError) {
-      return sendJson(res, 500, {
-        error: 'Deck generation failed.',
-        details: sanitizeErrorDetails(generationError),
-      });
-    }
-
-    if (!Array.isArray(deckDraft) || deckDraft.length !== 6) {
-      return sendJson(res, 500, {
-        error: 'Deck normalization failed.',
-        details: 'Gemini output did not contain exactly 6 validated slides.',
-      });
-    }
-
-    const normalizedSlides = deckDraft.map((slide) => ({
-      slideNumber: slide.slide_number,
-      theme: slide.theme,
-      headline: slide.headline,
-      subheadline: slide.subheadline,
-      dataPoints: slide.data_points,
-      imagePrompt: slide.nano_banana_prompt,
-    }));
-
-    if (!Array.isArray(normalizedSlides) || normalizedSlides.length !== 6) {
-      return sendJson(res, 500, {
-        error: 'Slide image generation failed.',
-        details: 'Normalized deck must contain exactly 6 slides before image generation.',
-      });
-    }
-
-    const configuredNanoBananaModel = String(
-      process.env.NANO_BANANA_MODEL ?? process.env.GOOGLE_IMAGEN_MODEL ?? '',
+    const configuredImageModel = String(
+      process.env.NANO_BANANA_MODEL ?? process.env.GEMINI_IMAGE_MODEL ?? 'gemini-3.1-flash-image-preview',
     )
       .trim()
       .toLowerCase();
-    const nanoBananaModel = configuredNanoBananaModel || 'nano-banana-2';
+    const imageModelCandidates = Array.from(
+      new Set(
+        [
+          configuredImageModel,
+          configuredImageModel === 'nano-banana-2' ? 'gemini-3.1-flash-image-preview' : null,
+          'gemini-3.1-flash-image-preview',
+          'imagen-4.0-fast-generate-001',
+          'imagen-3.0-generate-001',
+        ].filter(Boolean) as string[],
+      ),
+    );
 
-    let slidesWithBackgrounds: Array<{
-      slideNumber: number;
-      theme: string;
-      headline: string;
-      subheadline: string;
-      dataPoints: string[];
-      imagePrompt: string;
-      backgroundImageBase64: string;
-    }>;
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const textModel = genAI.getGenerativeModel({ model: textModelName });
+
+    let unifiedDeck: z.infer<typeof UnifiedDeckSchema>;
     try {
-      slidesWithBackgrounds = await Promise.all(
-        normalizedSlides.map(async (slide) => {
-          const prompt = String(slide.imagePrompt ?? '').trim();
-          if (!prompt) {
-            throw new Error(`Slide ${slide.slideNumber} is missing imagePrompt.`);
-          }
-
-          const imageResponse = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(nanoBananaModel)}:predict?key=${encodeURIComponent(apiKey)}`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
+      const response = await textModel.generateContent({
+        systemInstruction: UNIFIED_DECK_SYSTEM_INSTRUCTION,
+        tools: [{ googleSearch: {} } as any],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: UNIFIED_DECK_RESPONSE_SCHEMA,
+          temperature: 0.2,
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: `${UNIFIED_DECK_USER_PROMPT}\n\nRAW INTELLIGENCE PAYLOAD:\n${JSON.stringify(rawIntelligencePayload, null, 2)}`,
               },
-              body: JSON.stringify({
-                instances: [{ prompt }],
-                parameters: {
-                  sampleCount: 1,
-                  aspectRatio: '16:9',
-                },
-              }),
-            },
-          );
+            ],
+          },
+        ],
+      });
 
-          const imageRaw = await imageResponse.text();
-          let imageParsed: any = null;
-          try {
-            imageParsed = imageRaw ? JSON.parse(imageRaw) : null;
-          } catch {
-            imageParsed = null;
+      unifiedDeck = parseUnifiedDeckJson(response.response.text());
+    } catch (proError) {
+      return sendJson(res, 500, {
+        error: 'Gemini 3.1 Pro structured-output parse failure.',
+        details: sanitizeErrorDetails(proError),
+      });
+    }
+
+    let generatedImages: Array<{ slideNumber: number; backgroundImageBase64: string }>;
+    try {
+      generatedImages = await Promise.all(
+        unifiedDeck.slides.map(async (slide) => {
+          let lastError: unknown = null;
+          for (const imageModel of imageModelCandidates) {
+            try {
+              return await generateSlideBackgroundImage({
+                apiKey,
+                model: imageModel,
+                prompt: slide.nanoBananaPrompt,
+                slideNumber: slide.slideNumber,
+              });
+            } catch (error) {
+              lastError = error;
+              const normalized = sanitizeErrorDetails(error).toLowerCase();
+              const modelUnavailable = normalized.includes('404')
+                || normalized.includes('not found')
+                || normalized.includes('not supported');
+              if (modelUnavailable) {
+                continue;
+              }
+              throw error;
+            }
           }
-
-          if (!imageResponse.ok) {
-            throw new Error(
-              `Slide ${slide.slideNumber} image generation failed: Nano Banana 2 API ${imageResponse.status} ${
-                (imageParsed && JSON.stringify(imageParsed).slice(0, 500)) || imageRaw.slice(0, 500) || 'No response body.'
-              }`,
-            );
-          }
-
-          const backgroundImageBase64 = parseImagenBase64(imageParsed);
-          if (!backgroundImageBase64) {
-            throw new Error(
-              `Slide ${slide.slideNumber} image extraction failed: missing predictions[0].bytesBase64Encoded.`,
-            );
-          }
-
-          return {
-            ...slide,
-            backgroundImageBase64,
-          };
+          throw (lastError ?? new Error(`Slide ${slide.slideNumber} image generation failed: no supported model available.`));
         }),
       );
     } catch (imageError) {
       return sendJson(res, 500, {
-        error: 'Slide image generation failed.',
+        error: 'Image generation failure.',
         details: sanitizeErrorDetails(imageError),
       });
     }
 
-    const finalDeckResult = PersistedFinalDeckSchema.safeParse({
-      slides: slidesWithBackgrounds,
-    });
-    if (!finalDeckResult.success) {
+    if (generatedImages.length !== 6) {
       return sendJson(res, 500, {
-        error: 'Deck validation failed.',
-        details: finalDeckResult.error.issues[0]?.message ?? 'Final deck shape is invalid.',
+        error: 'Image generation failure.',
+        details: `Expected 6 images, received ${generatedImages.length}.`,
       });
     }
 
-    const finalDeck = finalDeckResult.data;
+    const imageBySlide = new Map(generatedImages.map((image) => [image.slideNumber, image.backgroundImageBase64]));
+    if (imageBySlide.size !== 6) {
+      return sendJson(res, 500, {
+        error: 'Image generation failure.',
+        details: 'Image generation returned duplicate or missing slide numbers.',
+      });
+    }
+
+    const finalDeckCandidate = {
+      analysis: unifiedDeck.analysis,
+      slides: unifiedDeck.slides.map((slide) => ({
+        ...slide,
+        backgroundImageBase64: imageBySlide.get(slide.slideNumber) ?? '',
+      })),
+    };
+
+    const finalDeckParse = FinalDeckSchema.safeParse(finalDeckCandidate);
+    if (!finalDeckParse.success) {
+      return sendJson(res, 500, {
+        error: 'Image generation failure.',
+        details: finalDeckParse.error.issues[0]?.message ?? 'Final deck shape invalid.',
+      });
+    }
+
+    const finalDeck = finalDeckParse.data;
 
     const { error: persistError } = await supabase
       .from('marketplace_assets')
-      .update({
-        generated_deck_json: finalDeck,
-      })
+      .update({ generated_deck_json: finalDeck })
       .eq('id', assetId)
       .eq('owner_user_id', user.id);
 
     if (persistError) {
       if (isRecoverableSchemaError(persistError)) {
         return sendJson(res, 503, {
-          error: 'Deck persistence failed.',
+          error: 'Persistence failure.',
           details: 'Run the latest Supabase migration to add marketplace_assets.generated_deck_json.',
         });
       }
       return sendJson(res, 500, {
-        error: 'Deck persistence failed.',
+        error: 'Persistence failure.',
         details: sanitizeErrorDetails(persistError),
       });
     }
 
-    return sendJson(res, 200, {
-      deck: finalDeck,
-    });
+    return sendJson(res, 200, { deck: finalDeck });
   } catch (error) {
     return sendJson(res, 500, {
       error: 'Failed to generate AI pitch deck.',

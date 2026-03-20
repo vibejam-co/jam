@@ -1074,7 +1074,7 @@ const App: React.FC = () => {
               <header className="mb-12 flex flex-col lg:flex-row lg:items-end justify-between gap-8">
                 <div>
                   <motion.h2 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tighter text-white mb-4 leading-[1.1]">
-                    Highest Earning <br />
+                    Most Profitable <br />
                     <span className="text-zinc-500">Vibe-Coded Apps</span>
                   </motion.h2>
                   <p className="text-zinc-500 text-base sm:text-lg font-medium">Verified revenue. Live progress. No fluff.</p>

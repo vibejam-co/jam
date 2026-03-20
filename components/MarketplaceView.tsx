@@ -110,7 +110,7 @@ const isIconImageSource = (value: string | null | undefined): boolean => {
   );
 };
 
-const mapAssetToVibeApp = (asset: MarketplaceAssetCard): VibeApp => {
+const mapAssetToVibeApp = (asset: MarketplaceAssetCard, sourceApp?: VibeApp): VibeApp => {
   const mrrDollars = Math.round(asset.mrrCents / 100);
   const rev30Dollars = Math.round(asset.last30dRevenueCents / 100);
   const growthPercent = Number((asset.last30dGrowthBps / 100).toFixed(2));
@@ -122,6 +122,15 @@ const mapAssetToVibeApp = (asset: MarketplaceAssetCard): VibeApp => {
 
   const resolvedMarketplaceAssetId = asset.marketplaceAssetId
     ?? (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(asset.id) ? asset.id : undefined);
+  const resolvedActiveUsersFromApp =
+    typeof sourceApp?.activeUsers === 'number' && Number.isFinite(sourceApp.activeUsers)
+      ? Math.max(0, Math.round(sourceApp.activeUsers))
+      : 0;
+  const resolvedActiveUsersFromSubscribers =
+    typeof asset.activeSubscribers === 'number' && Number.isFinite(asset.activeSubscribers)
+      ? Math.max(0, Math.round(asset.activeSubscribers))
+      : 0;
+  const resolvedActiveUsers = Math.max(resolvedActiveUsersFromApp, resolvedActiveUsersFromSubscribers);
 
   return {
     id: `market-${asset.id}`,
@@ -132,7 +141,7 @@ const mapAssetToVibeApp = (asset: MarketplaceAssetCard): VibeApp => {
     accentColor: '212, 175, 55',
     monthlyRevenue: mrrDollars,
     lifetimeRevenue: Math.max(rev30Dollars * 12, mrrDollars * 12),
-    activeUsers: 0,
+    activeUsers: resolvedActiveUsers,
     buildStreak: 0,
     growth: growthPercent,
     tags: [asset.category],
@@ -199,13 +208,7 @@ const mapFallbackApps = (apps: VibeApp[]): MarketplaceAssetCard[] =>
       last30dGrowthBps: Math.round((app.growth || 0) * 100),
       monthlyUniqueVisitors: Math.max(
         0,
-        Math.round(
-          Number(
-            typeof app.monthlyUniqueVisitors === 'number'
-              ? app.monthlyUniqueVisitors
-              : app.activeUsers ?? 0,
-          ),
-        ),
+        Math.round(Number(typeof app.monthlyUniqueVisitors === 'number' ? app.monthlyUniqueVisitors : 0)),
       ),
       analyticsProofUrl: null,
       activeSubscribers: 0,
@@ -656,6 +659,17 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
               : '—';
             const churnMeta = churnBadgeMeta(asset.churnBps);
             const cardIcon = isIconImageSource(asset.logoUrl) ? String(asset.logoUrl) : '💎';
+            const normalizedAssetMarketplaceId = String(asset.marketplaceAssetId ?? asset.id ?? '').trim().toLowerCase();
+            const normalizedAssetJamId = String(asset.jamId ?? '').trim().toLowerCase();
+            const linkedApp = apps.find((candidate) => {
+              const candidateMarketplaceId = String(candidate.marketplaceAssetId ?? '').trim().toLowerCase();
+              if (normalizedAssetMarketplaceId && candidateMarketplaceId && candidateMarketplaceId === normalizedAssetMarketplaceId) {
+                return true;
+              }
+
+              const candidateId = String(candidate.id ?? '').trim().toLowerCase();
+              return Boolean(normalizedAssetJamId && candidateId && candidateId === normalizedAssetJamId);
+            });
 
             return (
               <motion.div
@@ -663,7 +677,7 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: (i % 12) * 0.05 }}
-                onClick={() => onSelectApp(mapAssetToVibeApp(asset))}
+                onClick={() => onSelectApp(mapAssetToVibeApp(asset, linkedApp))}
                 className="group relative p-6 rounded-[24px] bg-white/[0.02] border border-white/5 transition-all duration-500 flex flex-col h-full hover:border-yellow-500/30 cursor-pointer"
               >
                 <div className="flex justify-between items-start mb-6">

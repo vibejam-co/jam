@@ -89,20 +89,74 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return payload as T;
 };
 
+const normalizeDeckPayloadToPitchDecks = (
+  deckPayload: unknown,
+): MarketplaceGenerateDeckResponse['pitchDecks'] | null => {
+  if (!deckPayload || typeof deckPayload !== 'object') {
+    return null;
+  }
+
+  const candidate = deckPayload as any;
+
+  if (Array.isArray(candidate.slides)) {
+    return candidate as MarketplaceGenerateDeckResponse['pitchDecks'];
+  }
+
+  if (Array.isArray(candidate.rendered_slides)) {
+    return {
+      slides: candidate.rendered_slides.map((slide: any) => ({
+        slideNumber: Number(slide?.slideNumber ?? 0),
+        slideGoal: typeof slide?.slideGoal === 'string' ? slide.slideGoal : undefined,
+        theme: typeof slide?.theme === 'string' ? slide.theme : undefined,
+        headline: typeof slide?.headline === 'string' ? slide.headline : undefined,
+        subheadline: typeof slide?.subheadline === 'string' ? slide.subheadline : undefined,
+        dataPoints: Array.isArray(slide?.dataPoints) ? slide.dataPoints : [],
+        backgroundImageBase64: typeof slide?.backgroundImageBase64 === 'string' ? slide.backgroundImageBase64 : undefined,
+      })),
+    };
+  }
+
+  if (Array.isArray(candidate?.final_deck_package?.repaired_slides)) {
+    return {
+      slides: candidate.final_deck_package.repaired_slides.map((slide: any) => ({
+        slideNumber: Number(slide?.slide_number ?? 0),
+        slideGoal: typeof slide?.slide_goal === 'string' ? slide.slide_goal : undefined,
+        theme: typeof slide?.theme === 'string' ? slide.theme : undefined,
+        headline: typeof slide?.headline === 'string' ? slide.headline : undefined,
+        subheadline: typeof slide?.subheadline === 'string' ? slide.subheadline : undefined,
+        dataPoints: Array.isArray(slide?.data_points) ? slide.data_points : [],
+      })),
+    };
+  }
+
+  return null;
+};
+
 const normalizeMarketplaceDeckResponse = (
   assetId: string,
   payload: MarketplaceGenerateDeckResponse | { deck?: unknown; reused?: unknown; assetId?: unknown } | null | undefined,
 ): MarketplaceGenerateDeckResponse => {
-  if (payload && typeof payload === 'object' && 'pitchDecks' in payload) {
-    return payload as MarketplaceGenerateDeckResponse;
+  const payloadObject = payload && typeof payload === 'object' ? (payload as any) : null;
+
+  if (payloadObject && 'pitchDecks' in payloadObject) {
+    const normalizedPitchDecks = normalizeDeckPayloadToPitchDecks(payloadObject.pitchDecks);
+    if (normalizedPitchDecks) {
+      return {
+        assetId: String(payloadObject.assetId ?? assetId),
+        reused: Boolean(payloadObject.reused),
+        pitchDecks: normalizedPitchDecks,
+      };
+    }
+    return payloadObject as MarketplaceGenerateDeckResponse;
   }
 
-  const legacyDeck = payload && typeof payload === 'object' ? (payload as any).deck : null;
-  if (legacyDeck && typeof legacyDeck === 'object') {
+  const deckPayload = payloadObject?.deck;
+  const normalizedDeck = normalizeDeckPayloadToPitchDecks(deckPayload);
+  if (normalizedDeck) {
     return {
-      assetId: String((payload as any)?.assetId ?? assetId),
-      reused: Boolean((payload as any)?.reused),
-      pitchDecks: legacyDeck as MarketplaceGenerateDeckResponse['pitchDecks'],
+      assetId: String(payloadObject?.assetId ?? assetId),
+      reused: Boolean(payloadObject?.reused),
+      pitchDecks: normalizedDeck,
     };
   }
 

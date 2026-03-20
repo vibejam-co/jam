@@ -418,6 +418,10 @@ export interface MarketplaceAssetTrafficResponse {
 
 export interface PitchDeckSlide {
   slideNumber: number;
+  theme?: string;
+  headline?: string;
+  subheadline?: string;
+  dataPoints?: string[];
   title: string;
   copy?: string;
   bodyText?: string;

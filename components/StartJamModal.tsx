@@ -82,6 +82,7 @@ const [formData, setFormData] = useState({
     monthlyRevenue: 0,
     monthlyOperatingExpenses: 0,
     activeUsers: 0,
+    monthlyUniqueVisitors: 0,
     analyticsProofUrl: '',
     founderName: defaultFounderName,
     founderEmail: defaultFounderEmail,
@@ -216,7 +217,9 @@ useEffect(() => {
     }
 
     const projectName = formData.name.trim() || 'Untitled Jam';
-    const tagline = formData.pitch.trim() || `${projectName} is now open for acquisition.`;
+    const rawPitch = formData.pitch.trim();
+    const tagline = (rawPitch || `${projectName} is now open for acquisition.`).slice(0, 220);
+    const description = rawPitch || tagline;
     const techStackArray = formData.techStack
       ? formData.techStack.split(',').map((item) => item.trim()).filter(Boolean)
       : [];
@@ -224,7 +227,7 @@ useEffect(() => {
     const draft = await createMarketplaceAssetDraft({
       name: projectName,
       tagline,
-      description: tagline,
+      description,
       logoUrl: isImageIconSource(formData.icon) ? formData.icon : undefined,
       websiteUrl: formData.website.trim() || undefined,
       category: formData.category,
@@ -246,7 +249,9 @@ useEffect(() => {
 
   const syncMarketplaceDraftForPreview = async (assetId: string): Promise<void> => {
     const projectName = formData.name.trim() || 'Untitled Jam';
-    const tagline = formData.pitch.trim() || `${projectName} is now open for acquisition.`;
+    const rawPitch = formData.pitch.trim();
+    const tagline = (rawPitch || `${projectName} is now open for acquisition.`).slice(0, 220);
+    const description = rawPitch || tagline;
     const techStackArray = formData.techStack
       ? formData.techStack.split(',').map((item) => item.trim()).filter(Boolean)
       : [];
@@ -260,7 +265,7 @@ useEffect(() => {
     await updateMarketplaceAsset(assetId, {
       name: projectName,
       tagline,
-      description: tagline,
+      description,
       websiteUrl: formData.website.trim() || undefined,
       category: formData.category,
       techStack: techStackArray,
@@ -278,10 +283,10 @@ useEffect(() => {
     });
 
     const normalizedAnalyticsProofUrl = formData.analyticsProofUrl.trim();
-    const normalizedActiveUsers = Math.max(0, Number(formData.activeUsers || 0));
-    if (normalizedActiveUsers > 0 || normalizedAnalyticsProofUrl.length > 0) {
+    const normalizedWebTraffic = Math.max(0, Number(formData.monthlyUniqueVisitors || 0));
+    if (normalizedWebTraffic > 0 || normalizedAnalyticsProofUrl.length > 0) {
       await updateMarketplaceAssetTraffic(assetId, {
-        monthlyUniqueVisitors: normalizedActiveUsers,
+        monthlyUniqueVisitors: normalizedWebTraffic,
         analyticsProofUrl: normalizedAnalyticsProofUrl || undefined,
       });
     }
@@ -393,7 +398,7 @@ useEffect(() => {
           : undefined,
       websiteUrl: formData.website.trim() || undefined,
       netProfitCents: Math.round(netProfitUsd * 100),
-      monthlyUniqueVisitors: Math.max(0, Number(formData.activeUsers || 0)),
+      monthlyUniqueVisitors: Math.max(0, Number(formData.monthlyUniqueVisitors || 0)),
       analyticsProofUrl: formData.analyticsProofUrl.trim() || undefined,
       monthlyOperatingExpensesUsd: safeOperatingExpenses,
       verificationProvider: selectedProvider ? PROVIDER_ID_MAP[selectedProvider] : undefined,
@@ -805,10 +810,30 @@ useEffect(() => {
                         type="number" 
                         placeholder="0"
                         value={formData.activeUsers}
-                        onChange={(e) => setFormData({...formData, activeUsers: parseInt(e.target.value) || 0})}
+                        onChange={(e) => setFormData({...formData, activeUsers: Math.max(0, parseInt(e.target.value, 10) || 0)})}
                         className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white pl-10"
                       />
                       <Users className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                    </div>
+                    <p className="text-[10px] text-zinc-600">Use logged-in monthly active users (MAU), not website visits.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Web Traffic (30D Visits)</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="0"
+                        value={formData.monthlyUniqueVisitors}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            monthlyUniqueVisitors: Math.max(0, Number.parseInt(e.target.value || '0', 10) || 0),
+                          })
+                        }
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white pl-10"
+                      />
+                      <Globe className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                     </div>
                   </div>
                   <div className="space-y-2">
