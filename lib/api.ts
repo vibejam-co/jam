@@ -344,9 +344,31 @@ export const updateDealRoomStatus = (offerId: string, newStatus: DealRoomStatus)
     body: JSON.stringify({ newStatus }),
   });
 
-export const initiateDealRoomEscrow = (offerId: string) =>
+export const initiateDealRoomEscrow = (
+  offerId: string,
+  options?: {
+    action?: 'initiate' | 'sandbox-fund';
+    paymentMethod?: 'wire_transfer';
+    sandboxAutoFund?: boolean;
+  },
+) =>
   request<DealEscrowCreateResponse>(`/api/marketplace/deals/${encodeURIComponent(offerId)}/escrow`, {
     method: 'POST',
+    body: JSON.stringify({
+      action: options?.action ?? 'initiate',
+      paymentMethod: options?.paymentMethod ?? 'wire_transfer',
+      sandboxAutoFund: options?.sandboxAutoFund ?? true,
+    }),
+  });
+
+export const fundDealRoomEscrowSandbox = (
+  offerId: string,
+  paymentMethod: 'wire_transfer' = 'wire_transfer',
+) =>
+  initiateDealRoomEscrow(offerId, {
+    action: 'sandbox-fund',
+    paymentMethod,
+    sandboxAutoFund: true,
   });
 
 export const fetchMyMarketplaceAssets = (options?: {

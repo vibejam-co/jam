@@ -365,18 +365,29 @@ const parseImageBase64 = (payload: any): string | null => {
   return null;
 };
 
+const sanitizePublicModelDetails = (value: unknown): string => {
+  const raw = sanitizeErrorDetails(value);
+  return raw
+    .replace(/models\/[a-z0-9._-]+/gi, 'models/[redacted]')
+    .replace(/\bgemini[\w.\s-]*/gi, 'AI model')
+    .replace(/\bnano[\s-]*banana[\w.\s-]*/gi, 'image model')
+    .replace(/\bimagen[\w.\s-]*/gi, 'image model')
+    .replace(/\bgoogle_search_retrieval\b/gi, 'search tool')
+    .replace(/\bgoogle_search\b/gi, 'search tool');
+};
+
 const parseUnifiedDeckJson = (rawText: string): z.infer<typeof UnifiedDeckSchema> => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stripJsonFences(rawText));
   } catch (error) {
-    throw new Error(`Gemini 3.1 Pro structured-output parse failure: invalid JSON. ${sanitizeErrorDetails(error)}`);
+    throw new Error(`Structured-output parse failure: invalid JSON. ${sanitizePublicModelDetails(error)}`);
   }
 
   const validated = UnifiedDeckSchema.safeParse(parsed);
   if (!validated.success) {
     throw new Error(
-      `Gemini 3.1 Pro structured-output parse failure: ${validated.error.issues[0]?.message ?? 'Invalid schema.'}`,
+      `Structured-output parse failure: ${validated.error.issues[0]?.message ?? 'Invalid schema.'}`,
     );
   }
   return validated.data;
@@ -734,8 +745,8 @@ export default async function handler(req: any, res: any) {
       unifiedDeck = parseUnifiedDeckJson(response.response.text());
     } catch (proError) {
       return sendJson(res, 500, {
-        error: 'Gemini 3.1 Pro structured-output parse failure.',
-        details: sanitizeErrorDetails(proError),
+        error: 'Structured-output parse failure.',
+        details: sanitizePublicModelDetails(proError),
       });
     }
 
@@ -770,7 +781,7 @@ export default async function handler(req: any, res: any) {
     } catch (imageError) {
       return sendJson(res, 500, {
         error: 'Image generation failure.',
-        details: sanitizeErrorDetails(imageError),
+        details: sanitizePublicModelDetails(imageError),
       });
     }
 
@@ -830,7 +841,7 @@ export default async function handler(req: any, res: any) {
   } catch (error) {
     return sendJson(res, 500, {
       error: 'Failed to generate AI pitch deck.',
-      details: sanitizeErrorDetails(error),
+      details: sanitizePublicModelDetails(error),
     });
   }
 }

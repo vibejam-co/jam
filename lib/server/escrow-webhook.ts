@@ -3,6 +3,8 @@ import { getSupabaseAdmin } from './supabase-admin.js';
 import { isRecoverableSchemaError, sanitizeErrorDetails } from './marketplace-utils.js';
 import { writeMarketplaceAuditLog } from './marketplace-audit.js';
 import { normalizeEscrowStatus } from './escrow.js';
+import { ensureConversation } from './profile-marketplace.js';
+import { sendInboxMessageNotificationEmail } from './email.js';
 
 type DealRoomStatus = 'ESCROW_FUNDED' | 'CLOSED';
 type DomainPipelineStage =
@@ -18,6 +20,11 @@ type DomainPipelineStage =
 const dealRoomStageByStatus: Record<DealRoomStatus, DomainPipelineStage> = {
   ESCROW_FUNDED: 'ESCROW_FUNDED',
   CLOSED: 'CLOSED',
+};
+
+const dealRoomStatusLabelByStatus: Record<DealRoomStatus, string> = {
+  ESCROW_FUNDED: 'Escrow Funded',
+  CLOSED: 'Closed',
 };
 
 const toDomainStorageStatusFromDealStatus = (status: DealRoomStatus): 'ACCEPTED' | 'REJECTED' => {
@@ -70,6 +77,134 @@ const mapEscrowToDealStatus = (escrowStatus: string, eventHint: string): DealRoo
   return null;
 };
 
+const resolveUserEmailById = async (supabase: any, userId: string): Promise<string | null> => {
+  if (!userId) {
+    return null;
+  }
+  const { data, error } = await supabase.auth.admin.getUserById(userId);
+  if (error) {
+    return null;
+  }
+  const email = data?.user?.email;
+  if (typeof email === 'string' && email.trim()) {
+    return email.trim();
+  }
+  return null;
+};
+
+const resolveAssetDisplayName = async (supabase: any, assetId: string): Promise<string> => {
+  if (!assetId) {
+    return 'Marketplace Listing';
+  }
+  const { data, error } = await supabase
+    .from('marketplace_assets')
+    .select('name, title')
+    .eq('id', assetId)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    if (isRecoverableSchemaError(error)) {
+      return 'Marketplace Listing';
+    }
+    throw error;
+  }
+  const label = String(data?.name ?? data?.title ?? '').trim();
+  return label || 'Marketplace Listing';
+};
+
+const notifyEscrowStatusTransition = async (input: {
+  supabase: any;
+  pipeline: any;
+  previousStatus: string | null;
+  mappedStatus: DealRoomStatus | null;
+  transactionId: string;
+}) => {
+  if (!input.mappedStatus) {
+    return;
+  }
+  if (String(input.previousStatus ?? '').toUpperCase() === input.mappedStatus) {
+    return;
+  }
+
+  const listingId = String(input.pipeline?.asset_id ?? '');
+  const buyerId = String(input.pipeline?.buyer_user_id ?? '');
+  const sellerId = String(input.pipeline?.seller_user_id ?? '');
+  if (!listingId || !buyerId || !sellerId) {
+    return;
+  }
+
+  const listingName = await resolveAssetDisplayName(input.supabase, listingId);
+  const stageLabel = dealRoomStatusLabelByStatus[input.mappedStatus] ?? input.mappedStatus;
+  const senderId = input.mappedStatus === 'CLOSED' ? sellerId : buyerId;
+  const senderLabel = 'Escrow Service';
+  const messageBody =
+    input.mappedStatus === 'ESCROW_FUNDED'
+      ? `Escrow is funded. Deal advanced to ${stageLabel}.`
+      : `Deal marked ${stageLabel}.`;
+
+  const conversationId = await ensureConversation({
+    supabase: input.supabase,
+    listingId,
+    buyerId,
+    sellerId,
+  });
+
+  const { error: messageError } = await input.supabase.from('messages').insert({
+    conversation_id: conversationId,
+    sender_id: senderId,
+    body: messageBody,
+  });
+  if (messageError && !isRecoverableSchemaError(messageError)) {
+    throw messageError;
+  }
+
+  const { error: conversationUpdateError } = await input.supabase
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  if (conversationUpdateError && !isRecoverableSchemaError(conversationUpdateError)) {
+    throw conversationUpdateError;
+  }
+
+  const recipientUserIds =
+    input.mappedStatus === 'CLOSED'
+      ? [buyerId, sellerId]
+      : [sellerId];
+
+  for (const recipientUserId of recipientUserIds) {
+    const { error: notificationError } = await input.supabase.from('notifications').insert({
+      title: 'Deal Room Update',
+      message: `${listingName} advanced to ${stageLabel}.`,
+      type: 'update',
+      timestamp_label: 'just now',
+      is_read: false,
+      jam_id: null,
+      recipient_user_id: recipientUserId,
+      metadata: {
+        listing_id: listingId,
+        conversation_id: conversationId,
+        stage: input.mappedStatus,
+        escrow_transaction_id: input.transactionId,
+      },
+    });
+    if (notificationError && !isRecoverableSchemaError(notificationError)) {
+      throw notificationError;
+    }
+
+    const recipientEmail = await resolveUserEmailById(input.supabase, recipientUserId);
+    try {
+      await sendInboxMessageNotificationEmail({
+        toEmail: recipientEmail,
+        senderLabel,
+        listingName,
+        message: messageBody,
+      });
+    } catch {
+      // Non-blocking: webhook sync should not fail on email provider errors.
+    }
+  }
+};
+
 export const handleEscrowWebhook = async (req: any, res: any) => {
   try {
     const payload = await parseJsonBody(req);
@@ -90,7 +225,7 @@ export const handleEscrowWebhook = async (req: any, res: any) => {
 
     const { data: pipelineRows, error: pipelineLookupError } = await supabase
       .from('marketplace_deal_pipeline')
-      .select('id, asset_id, buyer_user_id, seller_user_id')
+      .select('id, asset_id, buyer_user_id, seller_user_id, status')
       .eq('escrow_transaction_id', transactionId)
       .order('updated_at', { ascending: false })
       .limit(1);
@@ -100,6 +235,7 @@ export const handleEscrowWebhook = async (req: any, res: any) => {
     }
 
     let pipeline = Array.isArray(pipelineRows) && pipelineRows.length > 0 ? pipelineRows[0] : null;
+    const initialPipelineStatus = typeof pipeline?.status === 'string' ? pipeline.status : null;
 
     if (!pipeline) {
       const { data: domainOfferRows, error: domainOfferLookupError } = await supabase
@@ -136,7 +272,7 @@ export const handleEscrowWebhook = async (req: any, res: any) => {
 
         const { data: refreshedRows, error: refreshedError } = await supabase
           .from('marketplace_deal_pipeline')
-          .select('id, asset_id, buyer_user_id, seller_user_id')
+          .select('id, asset_id, buyer_user_id, seller_user_id, status')
           .eq('asset_id', fallbackDomainOffer.asset_id)
           .eq('buyer_user_id', fallbackDomainOffer.buyer_user_id)
           .eq('seller_user_id', fallbackDomainOffer.seller_user_id)
@@ -217,6 +353,14 @@ export const handleEscrowWebhook = async (req: any, res: any) => {
     if (legacyOfferUpdateError && !isRecoverableSchemaError(legacyOfferUpdateError)) {
       throw legacyOfferUpdateError;
     }
+
+    await notifyEscrowStatusTransition({
+      supabase,
+      pipeline,
+      previousStatus: initialPipelineStatus,
+      mappedStatus,
+      transactionId,
+    });
 
     await writeMarketplaceAuditLog({
       actorUserId: null,

@@ -264,7 +264,7 @@ const applyAssetFilters = (
   } else if (params.sort === 'rev30') {
     next = next.order('last30d_revenue_cents', { ascending: false });
   } else if (params.sort === 'multiple') {
-    next = next.order('valuation_multiple_x100', { ascending: false, nullsFirst: false });
+    next = next.order('valuation_multiple_x100', { ascending: true, nullsFirst: false });
   } else {
     next = next.order('created_at', { ascending: false });
   }
@@ -281,6 +281,20 @@ const mapBuyerAlertResponse = (row: any) => ({
       ? Math.max(0, Math.round(row.max_price_cents))
       : null,
   minProfitMarginBps: Math.max(0, Number(row.min_profit_margin_bps ?? 0)),
+  category: row.category ? String(row.category).trim() : null,
+  verifiedOnly: row.verified_only === true,
+  maxChurnBps:
+    typeof row.max_churn_bps === 'number' && Number.isFinite(row.max_churn_bps)
+      ? Math.max(0, Math.round(row.max_churn_bps))
+      : null,
+  minTraffic:
+    typeof row.min_traffic === 'number' && Number.isFinite(row.min_traffic)
+      ? Math.max(0, Math.round(row.min_traffic))
+      : null,
+  includeAlphaDigest: row.include_alpha_digest !== false,
+  digestFrequency:
+    row.digest_frequency === 'daily' || row.digest_frequency === 'off' ? row.digest_frequency : 'weekly',
+  lastDigestSentAt: row.last_digest_sent_at ? String(row.last_digest_sent_at) : null,
   createdAt: String(row.created_at ?? new Date().toISOString()),
 });
 
@@ -347,7 +361,7 @@ export default async function handler(req: any, res: any) {
       if (method === 'GET') {
         const { data, error } = await supabase
           .from('buyer_alerts')
-          .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,created_at')
+          .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,category,verified_only,max_churn_bps,min_traffic,include_alpha_digest,digest_frequency,last_digest_sent_at,created_at')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false });
 
@@ -383,19 +397,43 @@ export default async function handler(req: any, res: any) {
         ? null
         : Math.max(0, Math.round(Number(payload.maxPriceCents)));
       const minProfitMarginBps = Math.max(0, Math.round(Number(payload.minProfitMarginBps ?? 0)));
+      const category = payload.category ? String(payload.category).trim() : null;
+      const verifiedOnly = payload.verifiedOnly === true;
+      const maxChurnBps = payload.maxChurnBps === null || payload.maxChurnBps === undefined
+        ? null
+        : Math.max(0, Math.round(Number(payload.maxChurnBps)));
+      const minTraffic = payload.minTraffic === null || payload.minTraffic === undefined
+        ? null
+        : Math.max(0, Math.round(Number(payload.minTraffic)));
+      const includeAlphaDigest = payload.includeAlphaDigest !== false;
+      const digestFrequency = payload.digestFrequency === 'daily' || payload.digestFrequency === 'off'
+        ? payload.digestFrequency
+        : 'weekly';
 
       let existingQuery = supabase
         .from('buyer_alerts')
-        .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,created_at')
+        .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,category,verified_only,max_churn_bps,min_traffic,include_alpha_digest,digest_frequency,last_digest_sent_at,created_at')
         .eq('user_id', user.id)
         .eq('email', userEmail)
         .eq('min_mrr_cents', minMrrCents)
         .eq('min_profit_margin_bps', minProfitMarginBps)
+        .eq('verified_only', verifiedOnly)
+        .eq('include_alpha_digest', includeAlphaDigest)
+        .eq('digest_frequency', digestFrequency)
         .limit(1);
 
       existingQuery = maxPriceCents === null
         ? existingQuery.is('max_price_cents', null)
         : existingQuery.eq('max_price_cents', maxPriceCents);
+      existingQuery = category === null
+        ? existingQuery.is('category', null)
+        : existingQuery.eq('category', category);
+      existingQuery = maxChurnBps === null
+        ? existingQuery.is('max_churn_bps', null)
+        : existingQuery.eq('max_churn_bps', maxChurnBps);
+      existingQuery = minTraffic === null
+        ? existingQuery.is('min_traffic', null)
+        : existingQuery.eq('min_traffic', minTraffic);
 
       const { data: existingAlert, error: existingError } = await existingQuery.maybeSingle();
       if (existingError) {
@@ -425,8 +463,14 @@ export default async function handler(req: any, res: any) {
           min_mrr_cents: minMrrCents,
           max_price_cents: maxPriceCents,
           min_profit_margin_bps: minProfitMarginBps,
+          category,
+          verified_only: verifiedOnly,
+          max_churn_bps: maxChurnBps,
+          min_traffic: minTraffic,
+          include_alpha_digest: includeAlphaDigest,
+          digest_frequency: digestFrequency,
         })
-        .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,created_at')
+        .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,category,verified_only,max_churn_bps,min_traffic,include_alpha_digest,digest_frequency,last_digest_sent_at,created_at')
         .single();
 
       if (insertError) {
@@ -437,6 +481,26 @@ export default async function handler(req: any, res: any) {
           });
         }
         throw insertError;
+      }
+
+      if (includeAlphaDigest) {
+        const { error: subscribeError } = await supabase
+          .from('newsletter_subscriptions')
+          .upsert(
+            {
+              email: userEmail,
+              source: 'marketplace-alert-search',
+            },
+            {
+              onConflict: 'email',
+              ignoreDuplicates: false,
+            },
+          );
+
+        if (subscribeError && !isRecoverableSchemaError(subscribeError)) {
+          // Non-blocking: alert creation should not fail when newsletter subscription upsert fails.
+          console.warn('Failed to upsert newsletter subscription from buyer alert', subscribeError);
+        }
       }
 
       return sendJson(res, 200, {
@@ -855,6 +919,17 @@ export default async function handler(req: any, res: any) {
       });
 
       const filteredRows = hydratedRows.filter((row: any) => {
+        if (typeof params.minTraffic === 'number') {
+          const monthlyUniqueVisitors =
+            typeof row?.monthly_unique_visitors === 'number' && Number.isFinite(row.monthly_unique_visitors)
+              ? Math.max(0, Math.round(row.monthly_unique_visitors))
+              : 0;
+
+          if (monthlyUniqueVisitors < params.minTraffic) {
+            return false;
+          }
+        }
+
         if (typeof params.maxChurnBps === 'number') {
           const churnBps =
             typeof row?.churn_bps === 'number' && Number.isFinite(row.churn_bps)

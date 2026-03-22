@@ -90,6 +90,12 @@ export const CreateBuyerAlertSchema = z.object({
   minMrrCents: z.number().int().min(0).max(2_000_000_000).optional().default(0),
   maxPriceCents: z.number().int().min(0).max(2_000_000_000).nullable().optional().default(null),
   minProfitMarginBps: z.number().int().min(0).max(10_000).optional().default(0),
+  category: z.string().trim().min(1).max(80).nullable().optional().default(null),
+  verifiedOnly: z.boolean().optional().default(false),
+  maxChurnBps: z.number().int().min(0).max(100_000).nullable().optional().default(null),
+  minTraffic: z.number().int().min(0).max(1_000_000_000).nullable().optional().default(null),
+  includeAlphaDigest: z.boolean().optional().default(true),
+  digestFrequency: z.enum(['weekly', 'daily', 'off']).optional().default('weekly'),
 });
 
 export const InboxStartConversationSchema = z.object({

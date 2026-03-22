@@ -32,6 +32,7 @@ import {
   MarketplaceOwnerAsset,
   AcquireStage,
   DealRoomData,
+  DealEscrowCreateResponse,
   DealRoomStatus,
   MarketplacePitchDecks,
 } from '../types';
@@ -247,6 +248,23 @@ const linkifyMessageBody = (value: string): React.ReactNode[] => {
   });
 };
 
+const isVerificationPendingResponse = (response: DealEscrowCreateResponse): boolean => {
+  if (response.paymentBlockedCode === 'VERIFICATION_REQUIRED') {
+    return true;
+  }
+  const blockedReason = String(response.paymentBlockedReason ?? '').trim().toLowerCase();
+  return blockedReason.includes('verification review') || blockedReason.includes('requires buyer verification');
+};
+
+const buildVerificationPendingMessage = (response: DealEscrowCreateResponse): string => {
+  const note = String(response.sandboxNextStep?.note ?? '').trim();
+  if (note) {
+    return `Escrow sandbox is waiting for buyer verification review before payment can be approved. ${note}`;
+  }
+  return 'Escrow sandbox is waiting for buyer verification review before payment can be approved. '
+    + 'Approve the buyer verification in Integration Helper or Partner Dashboard, then retry funding.';
+};
+
 const ProfileView: React.FC<ProfileViewProps> = ({
   onClose,
   wishlist,
@@ -279,6 +297,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
   const [signedDocUrl, setSignedDocUrl] = useState('');
   const [signedDocType, setSignedDocType] = useState<'LOI' | 'APA' | 'DOC'>('LOI');
   const [signedDocNote, setSignedDocNote] = useState('');
+  const [inboxEscrowNotice, setInboxEscrowNotice] = useState<string | null>(null);
   const [inboxError, setInboxError] = useState<string | null>(null);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isInitiatingEscrow, setIsInitiatingEscrow] = useState(false);
@@ -323,9 +342,9 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       if (elapsedSeconds >= 15) {
         label = 'Finalizing PDF...';
       } else if (elapsedSeconds >= 8) {
-        label = 'Nano Banana 2 rendering slide visuals...';
+        label = 'Rendering slide visuals...';
       } else if (elapsedSeconds >= 3) {
-        label = 'Gemini 3 Pro drafting M&A narrative...';
+        label = 'Drafting acquisition narrative...';
       }
 
       setDeckGenerationStatus(`${elapsedSeconds}s · ${label}`);
@@ -734,6 +753,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({
     }
 
     setIsInitiatingEscrow(true);
+    setInboxEscrowNotice(null);
     setInboxError(null);
 
     try {
@@ -741,6 +761,22 @@ const ProfileView: React.FC<ProfileViewProps> = ({
       if (response.deal) {
         setSelectedDealRoom(response.deal);
       }
+
+      if (response.paymentReady === false) {
+        if (isVerificationPendingResponse(response)) {
+          setInboxEscrowNotice(buildVerificationPendingMessage(response));
+          return;
+        }
+
+        const blockedMessage = String(
+          response.paymentBlockedReason
+          ?? 'Escrow payment cannot proceed yet. Please review transaction diagnostics.',
+        ).trim();
+        const sandboxNote = String(response.sandboxNextStep?.note ?? '').trim();
+        setInboxError(sandboxNote ? `${blockedMessage} ${sandboxNote}` : blockedMessage);
+        return;
+      }
+
       const redirectUrl = String(response.landingPage ?? response.transactionPortalUrl ?? '').trim();
       if (redirectUrl) {
         window.location.href = redirectUrl;
@@ -1364,6 +1400,12 @@ const ProfileView: React.FC<ProfileViewProps> = ({
                 {inboxError && (
                   <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
                     {inboxError}
+                  </div>
+                )}
+
+                {inboxEscrowNotice && (
+                  <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-100">
+                    {inboxEscrowNotice}
                   </div>
                 )}
               </motion.div>

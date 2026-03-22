@@ -522,18 +522,27 @@ const MarketplaceView: React.FC<MarketplaceViewProps> = ({
       const minMrrCents = minMrr ? Math.max(0, Math.round(Number(minMrr) * 100)) : 0;
       const maxPriceCents = maxPrice ? Math.max(0, Math.round(Number(maxPrice) * 100)) : null;
       const minProfitMarginBps = Math.max(0, Math.round(minProfitMarginPct * 100));
+      const maxChurnBps = churnOptionToBps(maxChurnOption) ?? null;
+      const minTrafficThreshold = minTraffic ? Math.max(0, Math.round(Number(minTraffic))) : null;
+      const normalizedCategory = category === 'All' ? null : category;
 
       const response = await createMarketplaceBuyerAlert({
         minMrrCents,
         maxPriceCents,
         minProfitMarginBps,
+        category: normalizedCategory,
+        verifiedOnly,
+        maxChurnBps,
+        minTraffic: minTrafficThreshold,
+        includeAlphaDigest: true,
+        digestFrequency: 'weekly',
       });
 
       setAlertToast({
         kind: 'success',
         message: response.alreadyExisted
           ? 'Alert already active for this search.'
-          : 'Alert active. You will get an email when matching deals go live.',
+          : 'Alert active. Matching deals and weekly Alpha Intelligence updates are now personalized to this search.',
       });
     } catch (nextError) {
       const rawMessage = nextError instanceof Error ? nextError.message : 'Unable to create alert right now.';

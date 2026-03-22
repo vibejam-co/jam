@@ -1771,6 +1771,8 @@ const handleAcquireStage = async (req: any, res: any, user: any, supabase: any) 
     return sendJson(res, 400, { error: 'Sellers cannot move buyer acquisition stages for their own listing.' });
   }
 
+  const senderLabel = resolveUserLabel(user) ?? 'Marketplace Member';
+
   await upsertPipelineStage({
     supabase,
     buyerId: user.id,
@@ -1818,6 +1820,18 @@ const handleAcquireStage = async (req: any, res: any, user: any, supabase: any) 
         stage: payload.stage,
       },
     });
+
+    const recipientEmail = await resolveUserEmailById(supabase, String(listing.owner_user_id));
+    try {
+      await sendInboxMessageNotificationEmail({
+        toEmail: recipientEmail,
+        senderLabel,
+        listingName: String(listing.name ?? 'Marketplace Listing'),
+        message: messageBody,
+      });
+    } catch {
+      // Non-blocking: keep pipeline updates flowing even if email delivery fails.
+    }
   }
 
   return sendJson(res, 200, {

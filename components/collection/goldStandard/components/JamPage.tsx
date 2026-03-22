@@ -12,7 +12,7 @@ export const JamPage: React.FC<JamPageProps> = ({ compact = false }) => {
   const [refinedNarrative, setRefinedNarrative] = useState(data.narrative);
   const [isRefining, setIsRefining] = useState(false);
 
-  const refineWithGemini = async () => {
+  const refineNarrative = async () => {
     setIsRefining(true);
     // Keep preview self-contained and deterministic in the Canvas modal.
     window.setTimeout(() => {
@@ -62,11 +62,11 @@ export const JamPage: React.FC<JamPageProps> = ({ compact = false }) => {
           <div className="flex justify-between items-baseline mb-8">
             <h2 className="font-mono text-[10px] uppercase tracking-[0.4em] text-neutral-500">Narrative</h2>
             <button 
-              onClick={refineWithGemini}
+              onClick={refineNarrative}
               disabled={isRefining}
               className="text-[10px] font-mono uppercase tracking-widest text-neutral-400 hover:text-white transition-colors"
             >
-              {isRefining ? 'Curating...' : 'Curate via Gemini'}
+              {isRefining ? 'Curating...' : 'Curate via AI'}
             </button>
           </div>
           <div className={`${compact ? 'text-2xl' : 'text-3xl md:text-4xl'} leading-[1.3] font-light text-neutral-200`}>

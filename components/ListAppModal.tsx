@@ -183,9 +183,9 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
       if (elapsedSeconds >= 15) {
         label = 'Finalizing PDF...';
       } else if (elapsedSeconds >= 8) {
-        label = 'Nano Banana 2 rendering slide visuals...';
+        label = 'Rendering slide visuals...';
       } else if (elapsedSeconds >= 3) {
-        label = 'Gemini 3 Pro drafting M&A narrative...';
+        label = 'Drafting acquisition narrative...';
       }
 
       setDeckPreviewStatus(`${elapsedSeconds}s · ${label}`);
@@ -746,7 +746,7 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-xs text-zinc-400 leading-relaxed">
-                  Step 2 chooses your verification provider. On the next step you will add a read-only API key and run verification.
+                  Step 2 is optional. Connect a provider for verified revenue and stronger ranking priority, or continue without verification.
                 </div>
               </motion.div>
             )}
@@ -754,8 +754,8 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
             {step === 3 && (
               <motion.div key="s3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-10">
                 {!selectedProvider ? (
-                  <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-                    Select a provider in Step 2 before connecting a key.
+                  <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm text-cyan-100">
+                    No provider connected. Continue now for an unverified listing, or go back and connect a revenue source for verified ranking priority.
                   </div>
                 ) : (
                   <form
@@ -1069,49 +1069,6 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                   <input type="text" placeholder="React, Supabase, Stripe" value={formData.techStack} onChange={(e) => setFormData({ ...formData, techStack: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-white focus:outline-none" />
                 </div>
 
-                <div className="text-center mb-6">
-                  <h4 className="text-white font-bold text-xl mb-2">Boost Your Listing</h4>
-                  <p className="text-zinc-500 text-sm">
-                    {paidBoostsEnabled
-                      ? 'Select a tier to reach thousands of accredited buyers faster.'
-                      : 'Free listing access is currently active for all sellers.'}
-                  </p>
-                </div>
-
-                <div className={`grid grid-cols-1 ${paidBoostsEnabled ? 'md:grid-cols-3' : 'md:grid-cols-1'} gap-6`}>
-                  {visibleBoostTiers.map((tier) => (
-                    <button
-                      key={tier.id}
-                      onClick={() => {
-                        setSelectedTier(tier.id);
-                        const tierId = TIER_ID_MAP[tier.id];
-                        setPendingBoostCheckout((prev) => (prev && prev.tier !== tierId ? null : prev));
-                      }}
-                      className={`p-8 rounded-[40px] border flex flex-col text-left transition-all ${selectedTier === tier.id ? 'bg-yellow-500/10 border-yellow-500 shadow-2xl shadow-yellow-500/10' : 'bg-white/[0.02] border-white/5 hover:border-white/20'}`}
-                    >
-                      <div className="flex justify-between items-start mb-6">
-                        <span className={`text-[10px] font-black tracking-widest uppercase ${selectedTier === tier.id ? 'text-yellow-500' : 'text-zinc-500'}`}>{tier.name}</span>
-                        <span className="text-xl font-black text-white">{tier.price}</span>
-                      </div>
-                      <p className="text-xs text-zinc-400 mb-8 leading-relaxed h-10">{tier.desc}</p>
-                      <div className="space-y-3 mb-8">
-                        {tier.perks.map((perk) => (
-                          <div key={perk} className="flex items-center gap-2 text-[10px] font-bold text-zinc-500 uppercase">
-                            <CheckCircle2 className={`w-3 h-3 ${selectedTier === tier.id ? 'text-yellow-500' : 'text-zinc-700'}`} /> {perk}
-                          </div>
-                        ))}
-                      </div>
-                      {selectedTier === tier.id && <div className="mt-auto text-[10px] font-black text-yellow-500 uppercase tracking-widest text-center">SELECTED</div>}
-                    </button>
-                  ))}
-                </div>
-
-                {!paidBoostsEnabled && (
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-xs text-zinc-400 text-center">
-                    Pro and Elite boosts are temporarily unavailable during the free-listing rollout.
-                  </div>
-                )}
-
                 <motion.div
                   initial={{ opacity: 0, y: -6 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -1179,6 +1136,49 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
                   )}
                 </motion.div>
 
+                <div className="text-center mb-6">
+                  <h4 className="text-white font-bold text-xl mb-2">Boost Your Listing</h4>
+                  <p className="text-zinc-500 text-sm">
+                    {paidBoostsEnabled
+                      ? 'Select a tier to reach thousands of accredited buyers faster.'
+                      : 'Free listing access is currently active for all sellers.'}
+                  </p>
+                </div>
+
+                <div className={`grid grid-cols-1 ${paidBoostsEnabled ? 'md:grid-cols-3' : 'md:grid-cols-1'} gap-6`}>
+                  {visibleBoostTiers.map((tier) => (
+                    <button
+                      key={tier.id}
+                      onClick={() => {
+                        setSelectedTier(tier.id);
+                        const tierId = TIER_ID_MAP[tier.id];
+                        setPendingBoostCheckout((prev) => (prev && prev.tier !== tierId ? null : prev));
+                      }}
+                      className={`p-8 rounded-[40px] border flex flex-col text-left transition-all ${selectedTier === tier.id ? 'bg-yellow-500/10 border-yellow-500 shadow-2xl shadow-yellow-500/10' : 'bg-white/[0.02] border-white/5 hover:border-white/20'}`}
+                    >
+                      <div className="flex justify-between items-start mb-6">
+                        <span className={`text-[10px] font-black tracking-widest uppercase ${selectedTier === tier.id ? 'text-yellow-500' : 'text-zinc-500'}`}>{tier.name}</span>
+                        <span className="text-xl font-black text-white">{tier.price}</span>
+                      </div>
+                      <p className="text-xs text-zinc-400 mb-8 leading-relaxed h-10">{tier.desc}</p>
+                      <div className="space-y-3 mb-8">
+                        {tier.perks.map((perk) => (
+                          <div key={perk} className="flex items-center gap-2 text-[10px] font-bold text-zinc-500 uppercase">
+                            <CheckCircle2 className={`w-3 h-3 ${selectedTier === tier.id ? 'text-yellow-500' : 'text-zinc-700'}`} /> {perk}
+                          </div>
+                        ))}
+                      </div>
+                      {selectedTier === tier.id && <div className="mt-auto text-[10px] font-black text-yellow-500 uppercase tracking-widest text-center">SELECTED</div>}
+                    </button>
+                  ))}
+                </div>
+
+                {!paidBoostsEnabled && (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3 text-xs text-zinc-400 text-center">
+                    Pro and Elite boosts are temporarily unavailable during the free-listing rollout.
+                  </div>
+                )}
+
                 <div className="p-8 rounded-[32px] bg-black border border-white/5 flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center"><Rocket className="w-6 h-6 text-white" /></div>
@@ -1223,7 +1223,7 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
           <button
             onClick={
               step === 3
-                ? handleConnectProvider
+                ? (selectedProvider ? handleConnectProvider : nextStep)
                 : step === 4
                   ? handlePublish
                   : nextStep
@@ -1231,24 +1231,26 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
             disabled={
               isSubmitting ||
               (step === 1 && (!formData.founderEmail || !formData.name || !formData.founderName)) ||
-              (step === 2 && !selectedProvider) ||
               (step === 3 && (
-                !selectedProvider
-                || !apiKey.trim()
+                selectedProvider
+                && (
+                  !apiKey.trim()
                 || (selectedProvider === 'Dodo' && !dodoStoreId.trim())
                 || (selectedProvider === 'RevenueCat' && !revenueCatProjectId.trim())
+                )
               )) ||
               (step === 4 && !formData.askingPrice.trim())
             }
             className={`px-10 py-4 rounded-full font-black uppercase tracking-widest text-xs flex items-center gap-3 transition-all ${
               isSubmitting ||
               (step === 1 && (!formData.founderEmail || !formData.name || !formData.founderName)) ||
-              (step === 2 && !selectedProvider) ||
               (step === 3 && (
-                !selectedProvider
-                || !apiKey.trim()
+                selectedProvider
+                && (
+                  !apiKey.trim()
                 || (selectedProvider === 'Dodo' && !dodoStoreId.trim())
                 || (selectedProvider === 'RevenueCat' && !revenueCatProjectId.trim())
+                )
               )) ||
               (step === 4 && !formData.askingPrice.trim())
                 ? 'bg-white/5 text-zinc-800 cursor-not-allowed'
@@ -1256,7 +1258,9 @@ const ListAppModal: React.FC<ListAppModalProps> = ({ onClose, onPublish }) => {
             }`}
           >
             {step === 3 ? (
-              isSubmitting ? 'Validating...' : 'Validate & Continue'
+              selectedProvider
+                ? (isSubmitting ? 'Validating...' : 'Validate & Continue')
+                : 'Continue without Verification'
             ) : step === 4 ? (
               isSubmitting
                 ? 'Publishing...'

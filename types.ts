@@ -346,6 +346,12 @@ export interface MarketplaceBuyerAlertInput {
   minMrrCents?: number;
   maxPriceCents?: number | null;
   minProfitMarginBps?: number;
+  category?: string | null;
+  verifiedOnly?: boolean;
+  maxChurnBps?: number | null;
+  minTraffic?: number | null;
+  includeAlphaDigest?: boolean;
+  digestFrequency?: 'weekly' | 'daily' | 'off';
 }
 
 export interface MarketplaceBuyerAlert {
@@ -354,6 +360,13 @@ export interface MarketplaceBuyerAlert {
   minMrrCents: number;
   maxPriceCents: number | null;
   minProfitMarginBps: number;
+  category: string | null;
+  verifiedOnly: boolean;
+  maxChurnBps: number | null;
+  minTraffic: number | null;
+  includeAlphaDigest: boolean;
+  digestFrequency: 'weekly' | 'daily' | 'off';
+  lastDigestSentAt: string | null;
   createdAt: string;
 }
 
@@ -576,12 +589,66 @@ export interface DealRoomResponse {
   deal: DealRoomData;
 }
 
+export interface EscrowPaymentDiagnostics {
+  transactionId: string | null;
+  totalAmount: number;
+  itemAmount: number;
+  scheduleAmount: number;
+  payableAmount: number;
+  currency: string;
+  environment: 'sandbox' | 'production';
+  reason: string | null;
+}
+
+export interface EscrowSandboxFundingResult {
+  attempted: boolean;
+  succeeded: boolean;
+  paymentMethod: string;
+  reason?: string | null;
+}
+
+export interface EscrowSandboxVerificationResult {
+  attempted: boolean;
+  succeeded: boolean;
+  role: 'buyer' | 'seller' | 'broker';
+  customerEmail: string | null;
+  customerId: string | null;
+  submissionId: string | null;
+  reason: string | null;
+  credentialsSource: string | null;
+}
+
+export type EscrowPaymentBlockedCode =
+  | 'ZERO_PAYABLE'
+  | 'AGREEMENT_REQUIRED'
+  | 'VERIFICATION_REQUIRED'
+  | 'SANDBOX_FUNDING_FAILED';
+
 export interface DealEscrowCreateResponse {
   transactionId: string;
   escrowStatus: string | null;
   landingPage: string | null;
   transactionPortalUrl?: string | null;
   existingTransaction: boolean;
+  replacedTransactionId?: string | null;
+  paymentReady?: boolean;
+  paymentBlockedReason?: string | null;
+  paymentBlockedCode?: EscrowPaymentBlockedCode | null;
+  paymentDiagnostics?: EscrowPaymentDiagnostics | null;
+  sandboxFunding?: EscrowSandboxFundingResult | null;
+  sandboxVerification?: EscrowSandboxVerificationResult | null;
+  sandboxAgreement?: {
+    buyerAgreed: boolean | null;
+    sellerAgreed: boolean | null;
+    brokerAgreed: boolean | null;
+    buyerSellerAgreed: boolean;
+    reason: string | null;
+  } | null;
+  sandboxNextStep?: {
+    integrationHelperEndpoint: string;
+    partnerDashboardUrl: string;
+    note: string;
+  } | null;
   deal?: DealRoomData;
 }
 

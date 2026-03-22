@@ -8,7 +8,6 @@ import FeedRow from './components/FeedRow';
 import MarketRail from './components/MarketRail';
 import JamDetailView from './components/JamDetailView';
 import MarketplaceView from './components/MarketplaceView';
-import CanvasView from './components/CanvasView';
 import StartJamModal from './components/StartJamModal';
 import ListAppModal from './components/ListAppModal';
 import ProfileView from './components/ProfileView';
@@ -181,7 +180,7 @@ const getDealRoomOfferIdFromPath = (): string | null => {
 const App: React.FC = () => {
   const [dealRoomOfferId] = useState<string | null>(() => getDealRoomOfferIdFromPath());
   const [publicSlug] = useState<string | null>(() => getPublicSlugFromPath());
-  const [activeTab, setActiveTab] = useState<'Rankings' | 'Marketplace' | 'Canvas'>('Rankings');
+  const [activeTab, setActiveTab] = useState<'Rankings' | 'Marketplace'>('Rankings');
   const [filter, setFilter] = useState<string>('All');
   const [isCategoryMenuOpen, setIsCategoryMenuOpen] = useState(false);
   const [selectedApp, setSelectedApp] = useState<VibeApp | null>(null);
@@ -203,6 +202,7 @@ const App: React.FC = () => {
   const [quickInboxThreads, setQuickInboxThreads] = useState<InboxConversationSummary[]>([]);
   const [quickInboxLoading, setQuickInboxLoading] = useState(false);
   const [quickInboxError, setQuickInboxError] = useState<string | null>(null);
+  const visibleMainTabs: Array<'Rankings' | 'Marketplace'> = ['Rankings', 'Marketplace'];
   
   // Legal & Support State
   const [legalModalTab, setLegalModalTab] = useState<'Terms' | 'Privacy' | 'FAQ' | 'Support' | null>(null);
@@ -955,7 +955,7 @@ const App: React.FC = () => {
           </div>
 
           <div className="hidden md:flex items-center bg-white/5 rounded-full p-1 border border-white/5">
-            {['Rankings', 'Marketplace', 'Canvas'].map((tab) => (
+            {visibleMainTabs.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab as any)}
@@ -1077,7 +1077,7 @@ const App: React.FC = () => {
                     Most Profitable <br />
                     <span className="text-zinc-500">Vibe-Coded Apps</span>
                   </motion.h2>
-                  <p className="text-zinc-500 text-base sm:text-lg font-medium">Verified revenue. Live progress. No fluff.</p>
+                  <p className="text-zinc-500 text-base sm:text-lg font-medium">Real Businesses, Real Margins. No Fluff.</p>
                 </div>
 
                 <div className="flex items-center gap-2 pb-2 sm:pb-0 relative overflow-visible w-full lg:w-auto">
@@ -1230,20 +1230,6 @@ const App: React.FC = () => {
             </motion.div>
           )}
 
-          {activeTab === 'Canvas' && (
-            <motion.div key="canvas" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              <CanvasView
-                authUser={authUser}
-                onRequireAuth={() => setIsAuthOpen(true)}
-                onNavigateMainTab={setActiveTab}
-                onOpenProfile={handleProfileClick}
-                onToggleNotifications={() => setIsNotificationsOpen((prev) => !prev)}
-                onOpenStartJam={() => setIsStartJamOpen(true)}
-                unreadCount={unreadCount}
-                isNotificationsOpen={isNotificationsOpen}
-              />
-            </motion.div>
-          )}
         </AnimatePresence>
       </main>
 

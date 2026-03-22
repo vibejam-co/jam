@@ -17,7 +17,7 @@ import {
   Loader2,
   Lock,
 } from 'lucide-react';
-import { DealRoomData, DealRoomStatus } from '../types';
+import { DealEscrowCreateResponse, DealRoomData, DealRoomStatus } from '../types';
 import { fetchDealRoom, initiateDealRoomEscrow, updateDealRoomStatus } from '../lib/api';
 
 interface DealRoomViewProps {
@@ -92,6 +92,23 @@ const toFileToken = (value: string): string =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'deal-document';
+
+const isVerificationPendingResponse = (response: DealEscrowCreateResponse): boolean => {
+  if (response.paymentBlockedCode === 'VERIFICATION_REQUIRED') {
+    return true;
+  }
+  const blockedReason = String(response.paymentBlockedReason ?? '').trim().toLowerCase();
+  return blockedReason.includes('verification review') || blockedReason.includes('requires buyer verification');
+};
+
+const buildVerificationPendingMessage = (response: DealEscrowCreateResponse): string => {
+  const note = String(response.sandboxNextStep?.note ?? '').trim();
+  if (note) {
+    return `Escrow sandbox is waiting for buyer verification review before payment can be approved. ${note}`;
+  }
+  return 'Escrow sandbox is waiting for buyer verification review before payment can be approved. '
+    + 'Approve the buyer verification in Integration Helper or Partner Dashboard, then retry funding.';
+};
 
 const loiBodyText = (draft: LoiDraft): string => `LETTER OF INTENT (LOI)
 Facilitated via VibeJam Marketplace
@@ -374,6 +391,7 @@ const DealRoomView: React.FC<DealRoomViewProps> = ({ offerId, authUserId, onRequ
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isInitiatingEscrow, setIsInitiatingEscrow] = useState(false);
+  const [escrowNotice, setEscrowNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -385,6 +403,7 @@ const DealRoomView: React.FC<DealRoomViewProps> = ({ offerId, authUserId, onRequ
     let cancelled = false;
     const load = async () => {
       setIsLoading(true);
+      setEscrowNotice(null);
       setError(null);
       try {
         const response = await fetchDealRoom(offerId);
@@ -503,6 +522,7 @@ const DealRoomView: React.FC<DealRoomViewProps> = ({ offerId, authUserId, onRequ
     }
 
     setIsUpdating(true);
+    setEscrowNotice(null);
     setError(null);
 
     try {
@@ -521,12 +541,28 @@ const DealRoomView: React.FC<DealRoomViewProps> = ({ offerId, authUserId, onRequ
     }
 
     setIsInitiatingEscrow(true);
+    setEscrowNotice(null);
     setError(null);
 
     try {
       const response = await initiateDealRoomEscrow(deal.offerId);
       if (response.deal) {
         setDeal(response.deal);
+      }
+
+      if (response.paymentReady === false) {
+        if (isVerificationPendingResponse(response)) {
+          setEscrowNotice(buildVerificationPendingMessage(response));
+          return;
+        }
+
+        const blockedMessage = String(
+          response.paymentBlockedReason
+          ?? 'Escrow payment cannot proceed yet. Please review transaction diagnostics.',
+        ).trim();
+        const sandboxNote = String(response.sandboxNextStep?.note ?? '').trim();
+        setError(sandboxNote ? `${blockedMessage} ${sandboxNote}` : blockedMessage);
+        return;
       }
 
       const redirectUrl = String(response.landingPage ?? response.transactionPortalUrl ?? '').trim();
@@ -1147,6 +1183,12 @@ const DealRoomView: React.FC<DealRoomViewProps> = ({ offerId, authUserId, onRequ
               {error && (
                 <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
                   {error}
+                </div>
+              )}
+
+              {escrowNotice && (
+                <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-100">
+                  {escrowNotice}
                 </div>
               )}
             </div>

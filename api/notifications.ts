@@ -2,6 +2,7 @@ import { getMethod, methodNotAllowed, sendJson } from '../lib/server/http.js';
 import { getSupabaseAdmin } from '../lib/server/supabase-admin.js';
 import { getAuthenticatedUser } from '../lib/server/auth.js';
 import { getQueryValue, isRecoverableSchemaError, sanitizeErrorDetails } from '../lib/server/marketplace-utils.js';
+import { sendNewsletterWelcomeEmail } from '../lib/server/email.js';
 
 const NOTIFICATION_SELECT = [
   'id',
@@ -53,11 +54,72 @@ export default async function handler(req: any, res: any) {
 
       const body = await parseJsonBody(req);
       const email = String(body?.email ?? '').trim().toLowerCase();
+      const sourceRaw = String(body?.source ?? '').trim();
+      const source = sourceRaw.length > 0 ? sourceRaw.slice(0, 64) : 'vibejam-web';
       if (!EMAIL_REGEX.test(email)) {
         return sendJson(res, 400, { error: 'Please provide a valid email address.' });
       }
 
-      return sendJson(res, 200, { data: { success: true } });
+      const supabase = await getSupabaseAdmin();
+      const { data: existing, error: existingError } = await supabase
+        .from('newsletter_subscriptions')
+        .select('id')
+        .eq('email', email)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingError && !isRecoverableSchemaError(existingError)) {
+        throw existingError;
+      }
+
+      if (existing?.id) {
+        return sendJson(res, 200, {
+          data: {
+            success: true,
+            alreadySubscribed: true,
+            emailStatus: 'skipped',
+          },
+        });
+      }
+
+      const { error: insertError } = await supabase
+        .from('newsletter_subscriptions')
+        .insert({
+          email,
+          source,
+        });
+
+      if (insertError && !isRecoverableSchemaError(insertError)) {
+        if (String((insertError as any)?.code ?? '') === '23505') {
+          return sendJson(res, 200, {
+            data: {
+              success: true,
+              alreadySubscribed: true,
+              emailStatus: 'skipped',
+            },
+          });
+        }
+        throw insertError;
+      }
+
+      let emailStatus: 'sent' | 'skipped' | 'failed' = 'skipped';
+      let emailMessageId: string | null = null;
+      try {
+        const result = await sendNewsletterWelcomeEmail({ toEmail: email });
+        emailStatus = result.sent ? 'sent' : 'skipped';
+        emailMessageId = result.messageId ?? null;
+      } catch {
+        emailStatus = 'failed';
+      }
+
+      return sendJson(res, 200, {
+        data: {
+          success: true,
+          alreadySubscribed: false,
+          emailStatus,
+          emailMessageId,
+        },
+      });
     }
 
     if (method !== 'GET') {

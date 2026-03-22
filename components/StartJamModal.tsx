@@ -129,10 +129,12 @@ useEffect(() => {
     || (founderEmailValid && formData.marketplaceAskingPrice.trim().length > 0);
 
   const providerStepReady =
-    Boolean(selectedProvider)
-    && providerApiKey.trim().length > 0
-    && (selectedProvider !== 'Dodo' || dodoStoreId.trim().length > 0)
-    && (selectedProvider !== 'RevenueCat' || revenueCatProjectId.trim().length > 0);
+    !selectedProvider
+    || (
+      providerApiKey.trim().length > 0
+      && (selectedProvider !== 'Dodo' || dodoStoreId.trim().length > 0)
+      && (selectedProvider !== 'RevenueCat' || revenueCatProjectId.trim().length > 0)
+    );
 
   const isImageIconSource = (value: string): boolean => {
     const normalized = String(value ?? '').trim().toLowerCase();
@@ -198,9 +200,9 @@ useEffect(() => {
       if (elapsedSeconds >= 15) {
         label = 'Finalizing PDF...';
       } else if (elapsedSeconds >= 8) {
-        label = 'Nano Banana 2 rendering slide visuals...';
+        label = 'Rendering slide visuals...';
       } else if (elapsedSeconds >= 3) {
-        label = 'Gemini 3 Pro drafting M&A narrative...';
+        label = 'Drafting acquisition narrative...';
       }
 
       setDeckPreviewStatus(`${elapsedSeconds}s · ${label}`);
@@ -261,6 +263,9 @@ useEffect(() => {
     const computedProfitMargin = safeMonthlyRevenue > 0
       ? Math.max(0, Math.min(100, Number(((netProfitUsd / safeMonthlyRevenue) * 100).toFixed(2))))
       : 0;
+    const derivedPreviewAskingPrice =
+      formData.marketplaceAskingPrice.trim()
+      || String(Math.max(5000, Math.round(safeMonthlyRevenue * 48)));
 
     await updateMarketplaceAsset(assetId, {
       name: projectName,
@@ -271,7 +276,7 @@ useEffect(() => {
       techStack: techStackArray,
       founderName: formData.founderName.trim() || 'Founder',
       founderEmail: formData.founderEmail.trim(),
-      askingPriceUsd: formData.marketplaceAskingPrice.trim() || undefined,
+      askingPriceUsd: derivedPreviewAskingPrice,
       profitMarginPercent: computedProfitMargin,
       isAnonymous: formData.marketplaceIsAnonymous,
       visibility: formData.marketplaceVisibility,
@@ -297,18 +302,8 @@ useEffect(() => {
       return;
     }
 
-    if (!formData.publishToMarketplace) {
-      setDeckPreviewError('Enable marketplace publish to generate a deck preview.');
-      return;
-    }
-
     if (!founderEmailValid) {
       setDeckPreviewError('Enter a valid founder email before generating your deck preview.');
-      return;
-    }
-
-    if (!formData.marketplaceAskingPrice.trim()) {
-      setDeckPreviewError('Add an asking price before generating your deck preview.');
       return;
     }
 
@@ -358,7 +353,7 @@ useEffect(() => {
       buildStreak: 1,
       growth: 0,
       tags: [formData.category],
-      verified: Boolean(selectedProvider),
+      verified: false,
       category: formData.category,
       founder: {
         name: formData.founderName || 'Founder',
@@ -402,7 +397,10 @@ useEffect(() => {
       analyticsProofUrl: formData.analyticsProofUrl.trim() || undefined,
       monthlyOperatingExpensesUsd: safeOperatingExpenses,
       verificationProvider: selectedProvider ? PROVIDER_ID_MAP[selectedProvider] : undefined,
-      verificationApiKey: providerApiKey.trim() || undefined,
+      verificationApiKey:
+        selectedProvider
+          ? providerApiKey.trim() || undefined
+          : undefined,
       verificationProviderAccountId:
         selectedProvider === 'Dodo'
           ? dodoStoreId.trim() || undefined
@@ -583,7 +581,7 @@ useEffect(() => {
                   <>
                     <div className="text-center mb-10">
                       <h4 className="text-white font-bold text-lg mb-2">Verify Revenue Source</h4>
-                      <p className="text-zinc-500 text-sm">Select your primary payment processor to fetch verified MRR.</p>
+                      <p className="text-zinc-500 text-sm">Optional. Connect a payment processor to fetch verified MRR and unlock ranking priority.</p>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                       {PROVIDERS.map(p => (
@@ -954,7 +952,76 @@ useEffect(() => {
                       <ShieldCheck className="w-5 h-5 text-green-500" />
                       <h4 className="font-bold text-white text-sm tracking-tight">Ready for Verification</h4>
                    </div>
-                   <p className="text-zinc-500 text-xs">By publishing, your revenue data will be verified via {selectedProvider || 'manual entry'} and appear in the global rankings.</p>
+                   <p className="text-zinc-500 text-xs">
+                    {selectedProvider
+                      ? `By publishing, your revenue data will be verified via ${selectedProvider} and ranked with verification priority.`
+                      : 'By publishing without a provider, your listing is still live but appears as unverified in rankings.'
+                    }
+                   </p>
+                </div>
+
+                <div className="relative overflow-hidden rounded-xl border border-white/10 bg-gradient-to-br from-white/5 to-transparent p-4 mt-4">
+                  <motion.div
+                    aria-hidden
+                    className="pointer-events-none absolute -right-10 -top-14 h-44 w-44 rounded-full bg-gradient-to-br from-fuchsia-500/25 via-violet-500/15 to-cyan-400/20 blur-3xl"
+                    animate={{ opacity: [0.45, 0.8, 0.45], scale: [1, 1.08, 1] }}
+                    transition={{ duration: 4.6, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                  <div className="relative z-10 flex items-start justify-between gap-4">
+                    <div>
+                      <h5 className="text-sm font-black tracking-tight text-white flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-fuchsia-300" />
+                        ✨ AI Pitch Deck Generator
+                      </h5>
+                      <p className="mt-2 text-xs leading-relaxed text-zinc-300 max-w-xl">
+                        Let our AI Investment Banker instantly generate a 6-slide presentation deck
+                        using your current jam data, ready to share with buyers.
+                      </p>
+                    </div>
+                    <div className="shrink-0 flex flex-col items-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (deckPreviewData) {
+                            setDeckPreviewOpen(true);
+                            return;
+                          }
+                          void handlePreviewPitchDeck();
+                        }}
+                        disabled={deckPreviewLoading}
+                        className={`inline-flex h-8 items-center rounded-full border px-3 text-[10px] font-black uppercase tracking-widest transition-all ${
+                          deckPreviewData
+                            ? 'border-cyan-400/45 bg-cyan-500/20 text-cyan-100'
+                            : 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fuchsia-100'
+                        } ${deckPreviewLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        {deckPreviewLoading
+                          ? 'Generating...'
+                          : deckPreviewData
+                            ? 'View Deck Preview'
+                            : 'Generate Deck Preview'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData((prev) => ({ ...prev, includePitchDeck: !prev.includePitchDeck }))
+                        }
+                        className={`inline-flex h-7 items-center rounded-full border px-3 text-[9px] font-black uppercase tracking-widest transition-all ${
+                          formData.includePitchDeck
+                            ? 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fuchsia-100'
+                            : 'border-white/15 bg-black/20 text-zinc-300 hover:border-white/30'
+                        }`}
+                      >
+                        {formData.includePitchDeck ? 'Included on Publish' : 'Skip on Publish'}
+                      </button>
+                    </div>
+                  </div>
+                  {deckPreviewError && (
+                    <p className="relative z-10 mt-3 text-[11px] text-red-300">{deckPreviewError}</p>
+                  )}
+                  {!deckPreviewError && deckPreviewStatus && (
+                    <p className="relative z-10 mt-3 text-[11px] text-cyan-200">{deckPreviewStatus}</p>
+                  )}
                 </div>
 
                 <div className="p-6 rounded-3xl bg-[#D4AF37]/5 border border-[#D4AF37]/20 space-y-5">
@@ -1053,75 +1120,6 @@ useEffect(() => {
                           </div>
                         </div>
 
-                        <motion.div
-                          initial={{ opacity: 0, y: -6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -6 }}
-                          transition={{ duration: 0.2, ease: 'easeOut' }}
-                          className="relative overflow-hidden rounded-xl border border-white/10 bg-gradient-to-br from-white/5 to-transparent p-4 mt-4"
-                        >
-                          <motion.div
-                            aria-hidden
-                            className="pointer-events-none absolute -right-10 -top-14 h-44 w-44 rounded-full bg-gradient-to-br from-fuchsia-500/25 via-violet-500/15 to-cyan-400/20 blur-3xl"
-                            animate={{ opacity: [0.45, 0.8, 0.45], scale: [1, 1.08, 1] }}
-                            transition={{ duration: 4.6, repeat: Infinity, ease: 'easeInOut' }}
-                          />
-                          <div className="relative z-10 flex items-start justify-between gap-4">
-                            <div>
-                              <h5 className="text-sm font-black tracking-tight text-white flex items-center gap-2">
-                                <Sparkles className="w-4 h-4 text-fuchsia-300" />
-                                ✨ AI Pitch Deck Generator
-                              </h5>
-                              <p className="mt-2 text-xs leading-relaxed text-zinc-300 max-w-xl">
-                                Let our AI Investment Banker instantly generate a 6-slide presentation deck
-                                using your verified metrics, ready to send to buyers.
-                              </p>
-                            </div>
-                            <div className="shrink-0 flex flex-col items-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (deckPreviewData) {
-                                    setDeckPreviewOpen(true);
-                                    return;
-                                  }
-                                  void handlePreviewPitchDeck();
-                                }}
-                                disabled={deckPreviewLoading}
-                                className={`inline-flex h-8 items-center rounded-full border px-3 text-[10px] font-black uppercase tracking-widest transition-all ${
-                                  deckPreviewData
-                                    ? 'border-cyan-400/45 bg-cyan-500/20 text-cyan-100'
-                                    : 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fuchsia-100'
-                                } ${deckPreviewLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
-                              >
-                                {deckPreviewLoading
-                                  ? 'Generating...'
-                                  : deckPreviewData
-                                    ? 'View Deck Preview'
-                                    : 'Generate Deck Preview'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setFormData((prev) => ({ ...prev, includePitchDeck: !prev.includePitchDeck }))
-                                }
-                                className={`inline-flex h-7 items-center rounded-full border px-3 text-[9px] font-black uppercase tracking-widest transition-all ${
-                                  formData.includePitchDeck
-                                    ? 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fuchsia-100'
-                                    : 'border-white/15 bg-black/20 text-zinc-300 hover:border-white/30'
-                                }`}
-                              >
-                                {formData.includePitchDeck ? 'Included on Publish' : 'Skip on Publish'}
-                              </button>
-                            </div>
-                          </div>
-                          {deckPreviewError && (
-                            <p className="relative z-10 mt-3 text-[11px] text-red-300">{deckPreviewError}</p>
-                          )}
-                          {!deckPreviewError && deckPreviewStatus && (
-                            <p className="relative z-10 mt-3 text-[11px] text-cyan-200">{deckPreviewStatus}</p>
-                          )}
-                        </motion.div>
                       </motion.div>
                     )}
                   </AnimatePresence>

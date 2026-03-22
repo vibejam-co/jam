@@ -3,6 +3,7 @@ import { getMethod, methodNotAllowed, parseJsonBody, sendJson } from '../lib/ser
 import { getSupabaseAdmin } from '../lib/server/supabase-admin.js';
 import { isRecoverableSchemaError, sanitizeErrorDetails } from '../lib/server/marketplace-utils.js';
 import { toDbJamInput, toDbRevenueInput, toVibeApps } from '../lib/server/transformers.js';
+import { formatRank, getRankTier } from '../lib/ranking.js';
 
 const JAM_SELECT = [
   'id',
@@ -100,6 +101,79 @@ const AppPayloadSchema = z.object({
   app: VibeAppSchema,
 });
 
+const normalizeVerificationBand = (app: any): number => {
+  const status = String(app?.marketplaceVerifiedStatus ?? '').trim().toLowerCase();
+  if (status === 'verified') {
+    return 0;
+  }
+  if (status === 'pending') {
+    return 1;
+  }
+  return app?.verified ? 1 : 2;
+};
+
+const deriveProfitCents = (app: any): number => {
+  const netProfitCents = Number(app?.netProfitCents);
+  if (Number.isFinite(netProfitCents)) {
+    return Math.max(0, Math.round(netProfitCents));
+  }
+
+  const monthlyRevenueCents = Math.max(0, Math.round(Number(app?.monthlyRevenue ?? 0) * 100));
+  if (monthlyRevenueCents <= 0) {
+    return -1;
+  }
+
+  const profitMarginBps = Number(app?.profitMarginBps);
+  if (Number.isFinite(profitMarginBps)) {
+    return Math.max(0, Math.round((monthlyRevenueCents * profitMarginBps) / 10_000));
+  }
+
+  const profitMarginPercent = Number(app?.profitMargin);
+  if (Number.isFinite(profitMarginPercent)) {
+    return Math.max(0, Math.round((monthlyRevenueCents * profitMarginPercent) / 100));
+  }
+
+  return -1;
+};
+
+const rankApps = (apps: any[]) => {
+  const sorted = [...apps]
+    .map((app, index) => ({ app, index }))
+    .sort((left, right) => {
+      const verificationDelta = normalizeVerificationBand(left.app) - normalizeVerificationBand(right.app);
+      if (verificationDelta !== 0) {
+        return verificationDelta;
+      }
+
+      const profitDelta = deriveProfitCents(right.app) - deriveProfitCents(left.app);
+      if (profitDelta !== 0) {
+        return profitDelta;
+      }
+
+      const marginDelta = Number(right.app?.profitMarginBps ?? -1) - Number(left.app?.profitMarginBps ?? -1);
+      if (marginDelta !== 0) {
+        return marginDelta;
+      }
+
+      const revenueDelta = Number(right.app?.monthlyRevenue ?? 0) - Number(left.app?.monthlyRevenue ?? 0);
+      if (revenueDelta !== 0) {
+        return revenueDelta;
+      }
+
+      return left.index - right.index;
+    });
+
+  return sorted.map(({ app }, index) => {
+    const rankValue = index + 1;
+    return {
+      ...app,
+      rank: formatRank(rankValue),
+      rankValue,
+      rankTier: getRankTier(rankValue),
+    };
+  });
+};
+
 const loadApps = async (supabase: any) => {
   const { data: jams, error: jamsError } = await supabase
     .from('jams')
@@ -166,14 +240,14 @@ const loadApps = async (supabase: any) => {
   const { data: listingRows, error: listingError } = listingQuery;
   if (listingError) {
     if (isRecoverableSchemaError(listingError)) {
-      return baseApps;
+      return rankApps(baseApps);
     }
     throw listingError;
   }
 
   const listings = Array.isArray(listingRows) ? listingRows : [];
   if (listings.length === 0) {
-    return baseApps;
+    return rankApps(baseApps);
   }
 
   const listingIds = listings
@@ -271,7 +345,7 @@ const loadApps = async (supabase: any) => {
     return null;
   };
 
-  return baseApps.map((app) => {
+  const mergedApps = baseApps.map((app) => {
     const appName = String(app.name ?? '').trim().toLowerCase();
     const founderEmail = String(app.founder?.email ?? '').trim().toLowerCase();
 
@@ -313,6 +387,8 @@ const loadApps = async (supabase: any) => {
       : null;
     const pitchDeckCoverImageUrl = extractPitchDeckCoverImage((matchedListing as any)?.pitch_decks);
 
+    const listingVerifiedStatus = String((matchedListing as any)?.verified_status ?? '').trim().toLowerCase();
+
     return {
       ...app,
       icon: resolvedIcon,
@@ -330,6 +406,7 @@ const loadApps = async (supabase: any) => {
       marketplaceAssetId: matchedAssetId,
       marketplaceVerifiedStatus:
         ((matchedListing as any)?.verified_status as any) ?? app.marketplaceVerifiedStatus,
+      verified: listingVerifiedStatus === 'verified' ? true : app.verified,
       monthlyRevenue:
         typeof (matchedListing as any)?.mrr_cents === 'number' && (matchedListing as any).mrr_cents > 0
           ? Math.round((matchedListing as any).mrr_cents / 100)
@@ -345,6 +422,8 @@ const loadApps = async (supabase: any) => {
       pitchDeckCoverImageUrl: pitchDeckCoverImageUrl ?? app.pitchDeckCoverImageUrl ?? null,
     };
   });
+
+  return rankApps(mergedApps);
 };
 
 export default async function handler(req: any, res: any) {

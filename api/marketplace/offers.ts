@@ -9,14 +9,22 @@ import {
   parseUsdToCents,
   sanitizeErrorDetails,
 } from '../../lib/server/marketplace-utils.js';
-import { sendOfferNotificationEmail } from '../../lib/server/email.js';
+import { sendInboxMessageNotificationEmail, sendOfferNotificationEmail } from '../../lib/server/email.js';
 import { writeMarketplaceAuditLog } from '../../lib/server/marketplace-audit.js';
 import { checkRateLimit } from '../../lib/server/rate-limit.js';
 import { ensureConversation, upsertPipelineStage } from '../../lib/server/profile-marketplace.js';
 import {
+  approveEscrowSandboxVerificationViaIntegrationHelper,
+  approveEscrowSandboxPaymentViaIntegrationHelper,
   createEscrowTransaction,
   fetchEscrowTransaction,
+  fundEscrowTransactionInSandbox,
+  getEscrowEnvironment,
+  getEscrowSandboxApprovalGuidance,
   getEscrowTransactionPortalUrl,
+  normalizeEscrowStatus,
+  type EscrowPaymentDiagnostics,
+  type EscrowSandboxVerificationResult,
 } from '../../lib/server/escrow.js';
 import { handleEscrowWebhook } from '../../lib/server/escrow-webhook.js';
 
@@ -97,6 +105,222 @@ const dealRoomTransitions: Record<DealRoomStatus, DealRoomStatus[]> = {
   ASSETS_TRANSFERRED: ['CLOSED'],
   CLOSED: [],
   REJECTED: [],
+};
+
+const dealRoomDocumentStatuses = new Set<DealRoomStatus>([
+  'LOI_SIGNED',
+  'DUE_DILIGENCE',
+  'APA_SIGNED',
+  'ESCROW_FUNDED',
+  'ASSETS_TRANSFERRED',
+  'CLOSED',
+]);
+
+const dealRoomStatusLabelByStatus: Record<DealRoomStatus, string> = {
+  PENDING: 'Pending',
+  ACCEPTED: 'Accepted',
+  LOI_SIGNED: 'LOI Signed',
+  DUE_DILIGENCE: 'Due Diligence',
+  APA_SIGNED: 'APA Signed',
+  ESCROW_FUNDED: 'Escrow Funded',
+  ASSETS_TRANSFERRED: 'Assets Transferred',
+  CLOSED: 'Closed',
+  REJECTED: 'Rejected',
+};
+
+const dealRoomStatusRank: Record<DealRoomStatus, number> = {
+  PENDING: 0,
+  ACCEPTED: 1,
+  LOI_SIGNED: 2,
+  DUE_DILIGENCE: 3,
+  APA_SIGNED: 4,
+  ESCROW_FUNDED: 5,
+  ASSETS_TRANSFERRED: 6,
+  CLOSED: 7,
+  REJECTED: 8,
+};
+
+const ESCROW_SANDBOX_ZERO_PAYABLE_MESSAGE =
+  'Escrow sandbox transaction has zero payable amount. Payment method selection cannot proceed.';
+const ESCROW_SANDBOX_VERIFICATION_REQUIRED_MESSAGE =
+  'Escrow sandbox payment approval is waiting for buyer verification review in Integration Helper before payment can be marked paid.';
+
+const readEscrowParties = (payload: any): any[] => {
+  if (Array.isArray(payload?.parties)) {
+    return payload.parties;
+  }
+  if (Array.isArray(payload?.transaction?.parties)) {
+    return payload.transaction.parties;
+  }
+  if (Array.isArray(payload?.data?.parties)) {
+    return payload.data.parties;
+  }
+  return [];
+};
+
+const readEscrowPartyCustomerEmail = (payload: any, role: 'buyer' | 'seller' | 'broker'): string | null => {
+  const parties = readEscrowParties(payload);
+  const party = parties.find((entry) => String(entry?.role ?? '').trim().toLowerCase() === role);
+  const email = typeof party?.customer === 'string' ? party.customer.trim() : '';
+  return email || null;
+};
+
+const readEscrowScheduleEntries = (payload: any): any[] => {
+  const items = Array.isArray(payload?.items)
+    ? payload.items
+    : Array.isArray(payload?.transaction?.items)
+      ? payload.transaction.items
+      : Array.isArray(payload?.data?.items)
+        ? payload.data.items
+        : [];
+  const scheduleEntries: any[] = [];
+  for (const item of items) {
+    if (!Array.isArray(item?.schedule)) {
+      continue;
+    }
+    for (const scheduleEntry of item.schedule) {
+      scheduleEntries.push(scheduleEntry);
+    }
+  }
+  return scheduleEntries;
+};
+
+const inferDealRoomStatusFromEscrowSnapshot = (snapshot: {
+  escrowStatus: string | null;
+  raw?: any;
+}): DealRoomStatus | null => {
+  const fingerprint = [
+    normalizeEscrowStatus(snapshot.escrowStatus),
+    normalizeEscrowStatus(snapshot.raw?.status),
+    normalizeEscrowStatus(snapshot.raw?.state),
+  ].join(' ');
+
+  if (fingerprint.includes('completed') || fingerprint.includes('complete') || fingerprint.includes('closed')) {
+    return 'CLOSED';
+  }
+
+  const scheduleEntries = readEscrowScheduleEntries(snapshot.raw);
+  const paymentSecured = scheduleEntries.some((entry) =>
+    entry?.status?.secured === true || entry?.status?.payment_received === true);
+  if (paymentSecured) {
+    return 'ESCROW_FUNDED';
+  }
+
+  return null;
+};
+
+const parseEscrowPartyAgreement = (payload: any) => {
+  const parties = readEscrowParties(payload);
+  const findRole = (role: string) => parties.find((party) => String(party?.role ?? '').trim().toLowerCase() === role);
+
+  const buyer = findRole('buyer');
+  const seller = findRole('seller');
+  const broker = findRole('broker');
+
+  const toAgreementValue = (party: any): boolean | null =>
+    typeof party?.agreed === 'boolean' ? party.agreed : null;
+
+  const buyerAgreed = toAgreementValue(buyer);
+  const sellerAgreed = toAgreementValue(seller);
+  const brokerAgreed = toAgreementValue(broker);
+  const buyerSellerAgreed = buyerAgreed === true && sellerAgreed === true;
+
+  return {
+    buyerAgreed,
+    sellerAgreed,
+    brokerAgreed,
+    buyerSellerAgreed,
+    reason: buyerSellerAgreed ? null : 'agreement_required',
+  };
+};
+
+const resolveDealRoomSenderLabel = (context: any, actorUserId: string): string => {
+  const email = actorUserId === context.buyerUserId ? context.buyerEmail : context.sellerEmail;
+  if (typeof email === 'string' && email.includes('@')) {
+    return email.split('@')[0];
+  }
+  return actorUserId === context.buyerUserId ? 'Buyer' : 'Seller';
+};
+
+const notifyDealRoomCounterparty = async (input: {
+  supabase: any;
+  context: any;
+  actorUserId: string;
+  nextStatus: DealRoomStatus;
+}) => {
+  if (!dealRoomDocumentStatuses.has(input.nextStatus)) {
+    return;
+  }
+
+  const listingId = String(input.context.assetId ?? '');
+  const buyerId = String(input.context.buyerUserId ?? '');
+  const sellerId = String(input.context.sellerUserId ?? '');
+  if (!listingId || !buyerId || !sellerId) {
+    return;
+  }
+
+  const actorIsBuyer = input.actorUserId === buyerId;
+  const recipientUserId = actorIsBuyer ? sellerId : buyerId;
+  const recipientEmail = actorIsBuyer ? input.context.sellerEmail : input.context.buyerEmail;
+  const listingName = String(input.context.asset?.name ?? input.context.asset?.title ?? 'Marketplace Listing');
+  const statusLabel = dealRoomStatusLabelByStatus[input.nextStatus] ?? input.nextStatus;
+  const senderLabel = resolveDealRoomSenderLabel(input.context, input.actorUserId);
+  const messageBody = `${senderLabel} marked ${statusLabel}.`;
+
+  const conversationId = await ensureConversation({
+    supabase: input.supabase,
+    listingId,
+    buyerId,
+    sellerId,
+  });
+
+  const { error: messageError } = await input.supabase.from('messages').insert({
+    conversation_id: conversationId,
+    sender_id: input.actorUserId,
+    body: messageBody,
+  });
+  if (messageError && !isRecoverableSchemaError(messageError)) {
+    throw messageError;
+  }
+
+  const { error: conversationUpdateError } = await input.supabase
+    .from('conversations')
+    .update({ last_message_at: new Date().toISOString() })
+    .eq('id', conversationId);
+  if (conversationUpdateError && !isRecoverableSchemaError(conversationUpdateError)) {
+    throw conversationUpdateError;
+  }
+
+  const { error: notificationError } = await input.supabase.from('notifications').insert({
+    title: 'Deal Room Update',
+    message: `${listingName} advanced to ${statusLabel}.`,
+    type: 'update',
+    timestamp_label: 'just now',
+    is_read: false,
+    jam_id: null,
+    recipient_user_id: recipientUserId,
+    metadata: {
+      listing_id: listingId,
+      offer_id: input.context.legacyOfferId ?? null,
+      domain_offer_id: input.context.domainOffer?.id ?? null,
+      conversation_id: conversationId,
+      stage: input.nextStatus,
+    },
+  });
+  if (notificationError && !isRecoverableSchemaError(notificationError)) {
+    throw notificationError;
+  }
+
+  try {
+    await sendInboxMessageNotificationEmail({
+      toEmail: recipientEmail,
+      senderLabel,
+      listingName,
+      message: messageBody,
+    });
+  } catch {
+    // Non-blocking: stage progression should remain durable even if email delivery fails.
+  }
 };
 
 const toDealRoomStatusFromOfferStatus = (status: string | null | undefined): DealRoomStatus => {
@@ -897,8 +1121,15 @@ const handleGetDealRoom = async (req: any, res: any) => {
     return sendJson(res, 403, { error: 'Not allowed to view this deal.', code: 'NOT_PARTICIPANT' });
   }
 
+  const reconciledContext = await syncDealRoomStatusFromEscrowIfNeeded({
+    supabase,
+    context,
+    offerId,
+    actorUserId: user.id,
+  });
+
   return sendJson(res, 200, {
-    data: dealRoomResponse(context, user.id),
+    data: dealRoomResponse(reconciledContext, user.id),
   });
 };
 
@@ -1011,6 +1242,13 @@ const handlePatchDealRoom = async (req: any, res: any) => {
     },
   });
 
+  await notifyDealRoomCounterparty({
+    supabase,
+    context,
+    actorUserId: user.id,
+    nextStatus,
+  });
+
   const refreshed = await resolveDealRoomContext(supabase, offerId);
   if (!refreshed) {
     return sendJson(res, 404, { error: 'Deal not found.', code: 'DEAL_NOT_FOUND' });
@@ -1064,6 +1302,103 @@ const persistEscrowStateForContext = async (input: {
   }
 };
 
+const syncDealRoomStatusFromEscrowIfNeeded = async (input: {
+  supabase: any;
+  context: any;
+  offerId: string;
+  actorUserId: string;
+}) => {
+  const transactionId = String(input.context.escrowTransactionId ?? '').trim();
+  if (!transactionId || !input.context.pipelineId) {
+    return input.context;
+  }
+
+  try {
+    const snapshot = await fetchEscrowTransaction(transactionId);
+    await persistEscrowStateForContext({
+      supabase: input.supabase,
+      context: input.context,
+      escrowTransactionId: snapshot.transactionId,
+      escrowStatus: snapshot.escrowStatus,
+    });
+
+    const inferredStatus = inferDealRoomStatusFromEscrowSnapshot({
+      escrowStatus: snapshot.escrowStatus,
+      raw: snapshot.raw,
+    });
+
+    const currentStatus = input.context.status as DealRoomStatus;
+    const shouldAdvance =
+      inferredStatus
+      && currentStatus !== 'REJECTED'
+      && (dealRoomStatusRank[inferredStatus] ?? -1) > (dealRoomStatusRank[currentStatus] ?? -1);
+
+    if (shouldAdvance) {
+      const { error: pipelineUpdateError } = await input.supabase
+        .from('marketplace_deal_pipeline')
+        .update({
+          status: inferredStatus,
+          stage: dealRoomStageByStatus[inferredStatus],
+        })
+        .eq('id', input.context.pipelineId);
+      if (pipelineUpdateError && !isRecoverableSchemaError(pipelineUpdateError)) {
+        throw pipelineUpdateError;
+      }
+
+      if (input.context.domainOffer?.id) {
+        const { error: domainOfferError } = await input.supabase
+          .from('marketplace_offers')
+          .update({
+            status: toDomainStorageStatusFromDealStatus(inferredStatus),
+          })
+          .eq('id', input.context.domainOffer.id);
+        if (domainOfferError && !isRecoverableSchemaError(domainOfferError)) {
+          throw domainOfferError;
+        }
+      }
+
+      if (input.context.legacyOffer?.id) {
+        const { error: legacyOfferError } = await input.supabase
+          .from('offers')
+          .update({
+            status: toLegacyStorageStatusFromDealStatus(inferredStatus),
+          })
+          .eq('id', input.context.legacyOffer.id);
+        if (legacyOfferError && !isRecoverableSchemaError(legacyOfferError)) {
+          throw legacyOfferError;
+        }
+      }
+
+      await writeMarketplaceAuditLog({
+        actorUserId: input.actorUserId,
+        assetId: input.context.assetId,
+        action: 'deal_room_status_synced_from_escrow',
+        severity: 'INFO',
+        reason: inferredStatus,
+        metadata: {
+          offer_id: input.context.legacyOfferId,
+          domain_offer_id: input.context.domainOffer?.id ?? null,
+          from_status: currentStatus,
+          to_status: inferredStatus,
+          escrow_transaction_id: snapshot.transactionId,
+          escrow_status: snapshot.escrowStatus,
+          sync_source: 'deal_room_get',
+        },
+      });
+    }
+
+    const refreshed = await resolveDealRoomContext(input.supabase, input.offerId);
+    return refreshed ?? input.context;
+  } catch (syncError) {
+    console.warn('[deal-room-escrow-sync] unable to reconcile escrow status', {
+      offerId: input.offerId,
+      transactionId,
+      error: sanitizeErrorDetails(syncError),
+    });
+    return input.context;
+  }
+};
+
 const handlePostDealRoomEscrow = async (req: any, res: any) => {
   const user = await getAuthenticatedUser(req);
   if (!user?.id) {
@@ -1074,6 +1409,29 @@ const handlePostDealRoomEscrow = async (req: any, res: any) => {
   if (!offerId) {
     return sendJson(res, 400, { error: 'Missing offerId.', code: 'MISSING_OFFER_ID' });
   }
+
+  let escrowRequestBody: any = {};
+  try {
+    escrowRequestBody = await parseJsonBody(req);
+  } catch {
+    return sendJson(res, 400, {
+      error: 'Invalid Escrow request payload.',
+      code: 'INVALID_ESCROW_PAYLOAD',
+    });
+  }
+
+  const requestedAction = String(escrowRequestBody?.action ?? '').trim().toLowerCase();
+  if (requestedAction && requestedAction !== 'sandbox-fund' && requestedAction !== 'sandbox_fund' && requestedAction !== 'initiate') {
+    return sendJson(res, 400, {
+      error: 'Invalid Escrow action.',
+      details: 'Valid actions: initiate, sandbox-fund.',
+      code: 'INVALID_ESCROW_ACTION',
+    });
+  }
+
+  const explicitSandboxFundRequest = requestedAction === 'sandbox-fund' || requestedAction === 'sandbox_fund';
+  const sandboxAutoFundRequested = explicitSandboxFundRequest || escrowRequestBody?.sandboxAutoFund !== false;
+  const requestedPaymentMethod = String(escrowRequestBody?.paymentMethod ?? 'wire_transfer').trim().toLowerCase() || 'wire_transfer';
 
   const supabase = await getSupabaseAdmin();
   const context = await resolveDealRoomContext(supabase, offerId);
@@ -1122,54 +1480,495 @@ const handlePostDealRoomEscrow = async (req: any, res: any) => {
   }
 
   try {
+    const buildFallbackDiagnostics = (
+      transactionId: string | null,
+      reason: string | null,
+    ): EscrowPaymentDiagnostics => ({
+      transactionId,
+      totalAmount: 0,
+      itemAmount: 0,
+      scheduleAmount: 0,
+      payableAmount: 0,
+      currency: 'usd',
+      environment: getEscrowEnvironment(),
+      reason,
+    });
+
+    const createAndPersistEscrow = async () => {
+      const createdEscrow = await createEscrowTransaction({
+        description: `VibeJam Acquisition: ${safeAssetTitle}`,
+        title: safeAssetTitle,
+        itemDescription: `Full transfer of source code, domains, and IP for ${safeAssetTitle}`,
+        priceUsd: agreedPriceUsd,
+        buyerEmail: context.buyerEmail,
+        sellerEmail: context.sellerEmail,
+      });
+
+      await persistEscrowStateForContext({
+        supabase,
+        context,
+        escrowTransactionId: createdEscrow.transactionId,
+        escrowStatus: createdEscrow.escrowStatus,
+      });
+
+      return createdEscrow;
+    };
+
+    const respondWithEscrowState = async (input: {
+      statusCode: number;
+      transactionId: string;
+      escrowStatus: string | null;
+      landingPage: string | null;
+      transactionPortalUrl: string | null;
+      existingTransaction: boolean;
+      replacedTransactionId?: string | null;
+      paymentDiagnostics: EscrowPaymentDiagnostics | null;
+      rawEscrowPayload?: any;
+    }) => {
+      const paymentDiagnostics =
+        input.paymentDiagnostics
+        ?? buildFallbackDiagnostics(input.transactionId, 'missing_payment_diagnostics');
+
+      const transactionPortalUrl = input.transactionPortalUrl ?? getEscrowTransactionPortalUrl(input.transactionId) ?? null;
+      const isSandbox = paymentDiagnostics.environment === 'sandbox';
+      const hasPayableAmount = Number(paymentDiagnostics.payableAmount ?? 0) > 0;
+      const diagnosticPayload = {
+        transaction_id: input.transactionId,
+        currency: paymentDiagnostics.currency,
+        item_amount: paymentDiagnostics.itemAmount,
+        schedule_amount: paymentDiagnostics.scheduleAmount,
+        total_amount: paymentDiagnostics.totalAmount,
+        payable_amount: paymentDiagnostics.payableAmount,
+        environment: paymentDiagnostics.environment,
+        reason: paymentDiagnostics.reason,
+      };
+
+      console.info('[escrow-payment-diagnostics]', diagnosticPayload);
+
+      await writeMarketplaceAuditLog({
+        actorUserId: user.id,
+        assetId: context.assetId,
+        action: 'deal_room_escrow_payment_diagnostics',
+        severity: hasPayableAmount ? 'INFO' : 'WARN',
+        reason: hasPayableAmount ? 'ESCROW_PAYABLE_VALIDATED' : 'ESCROW_ZERO_PAYABLE',
+        metadata: {
+          offer_id: context.legacyOfferId,
+          domain_offer_id: context.domainOffer?.id ?? null,
+          escrow_transaction_id: input.transactionId,
+          ...diagnosticPayload,
+        },
+      });
+
+      const refreshed = await resolveDealRoomContext(supabase, offerId);
+      const basePayload = {
+        transactionId: input.transactionId,
+        escrowStatus: input.escrowStatus,
+        landingPage: input.landingPage ?? transactionPortalUrl,
+        transactionPortalUrl,
+        existingTransaction: input.existingTransaction,
+        paymentReady: hasPayableAmount,
+        paymentDiagnostics,
+        ...(input.replacedTransactionId ? { replacedTransactionId: input.replacedTransactionId } : {}),
+        ...(refreshed ? dealRoomResponse(refreshed, user.id) : {}),
+      };
+
+      if (!hasPayableAmount) {
+        const blockedReason = isSandbox
+          ? ESCROW_SANDBOX_ZERO_PAYABLE_MESSAGE
+          : 'Escrow transaction has zero payable amount. Payment method selection cannot proceed.';
+        return sendJson(res, 200, {
+          data: {
+            ...basePayload,
+            landingPage: null,
+            paymentReady: false,
+            paymentBlockedReason: blockedReason,
+            paymentBlockedCode: 'ZERO_PAYABLE',
+            sandboxFunding: isSandbox
+              ? {
+                attempted: false,
+                succeeded: false,
+                paymentMethod: requestedPaymentMethod,
+                reason: 'zero_payable_amount',
+              }
+              : null,
+            sandboxNextStep: isSandbox ? getEscrowSandboxApprovalGuidance(input.transactionId) : null,
+          },
+        });
+      }
+
+      let sandboxFunding: {
+        attempted: boolean;
+        succeeded: boolean;
+        paymentMethod: string;
+        reason?: string | null;
+      } | null = null;
+      let sandboxVerification: EscrowSandboxVerificationResult | null = null;
+      let effectiveLandingPage = basePayload.landingPage;
+      const agreement = parseEscrowPartyAgreement(input.rawEscrowPayload);
+
+      if (explicitSandboxFundRequest && !isSandbox) {
+        return sendJson(res, 400, {
+          error: 'Sandbox funding action is only available in Escrow sandbox environment.',
+          code: 'ESCROW_SANDBOX_ONLY_ACTION',
+        });
+      }
+
+      if (isSandbox && sandboxAutoFundRequested) {
+        if (!agreement.buyerSellerAgreed) {
+          const agreementMessage =
+            'Escrow sandbox transaction is waiting for buyer and seller agreement before API funding can proceed.';
+          sandboxFunding = {
+            attempted: false,
+            succeeded: false,
+            paymentMethod: requestedPaymentMethod,
+            reason: 'agreement_required',
+          };
+
+          if (explicitSandboxFundRequest) {
+            return sendJson(res, 200, {
+              data: {
+                ...basePayload,
+                paymentReady: false,
+                paymentBlockedReason: agreementMessage,
+                paymentBlockedCode: 'AGREEMENT_REQUIRED',
+                landingPage: null,
+                sandboxFunding,
+                sandboxVerification,
+                sandboxAgreement: agreement,
+                sandboxNextStep: getEscrowSandboxApprovalGuidance(input.transactionId),
+              },
+            });
+          }
+
+          return sendJson(res, input.statusCode, {
+            data: {
+              ...basePayload,
+              landingPage: effectiveLandingPage,
+              sandboxFunding,
+              sandboxVerification,
+              sandboxAgreement: agreement,
+              sandboxNextStep: getEscrowSandboxApprovalGuidance(input.transactionId),
+            },
+          });
+        }
+
+        if (requestedPaymentMethod !== 'wire_transfer') {
+          return sendJson(res, 400, {
+            error: 'Only wire_transfer sandbox funding is supported.',
+            details: 'Use paymentMethod=wire_transfer for sandbox API funding.',
+            code: 'ESCROW_SANDBOX_UNSUPPORTED_PAYMENT_METHOD',
+          });
+        }
+
+        const approvalAmountUsd = Number(
+          (
+            paymentDiagnostics.scheduleAmount > 0
+              ? paymentDiagnostics.scheduleAmount
+              : paymentDiagnostics.payableAmount
+          ).toFixed(2),
+        );
+        let paymentMethodAlreadySet = false;
+
+        try {
+          await fundEscrowTransactionInSandbox({
+            transactionId: input.transactionId,
+            paymentMethod: 'wire_transfer',
+          });
+        } catch (sandboxFundingError) {
+          const fundingReason = sanitizeErrorDetails(sandboxFundingError);
+          const fundingReasonLower = fundingReason.toLowerCase();
+          paymentMethodAlreadySet = fundingReasonLower.includes('payment method already set');
+          if (!paymentMethodAlreadySet) {
+            sandboxFunding = {
+              attempted: true,
+              succeeded: false,
+              paymentMethod: 'wire_transfer',
+              reason: fundingReason,
+            };
+            return sendJson(res, 200, {
+              data: {
+                ...basePayload,
+                landingPage: null,
+                paymentReady: false,
+                paymentBlockedReason: `Escrow sandbox API funding failed. ${fundingReason}`,
+                paymentBlockedCode: 'SANDBOX_FUNDING_FAILED',
+                sandboxFunding,
+                sandboxVerification,
+                sandboxAgreement: agreement,
+                sandboxNextStep: getEscrowSandboxApprovalGuidance(input.transactionId),
+              },
+            });
+          }
+        }
+
+        try {
+          await approveEscrowSandboxPaymentViaIntegrationHelper({
+            transactionId: input.transactionId,
+            amountUsd: approvalAmountUsd,
+            method: 'wire_transfer',
+          });
+          sandboxFunding = {
+            attempted: true,
+            succeeded: true,
+            paymentMethod: 'wire_transfer',
+            ...(paymentMethodAlreadySet ? { reason: 'payment_method_already_set' } : {}),
+          };
+          effectiveLandingPage = transactionPortalUrl;
+        } catch (sandboxApprovalError) {
+          const approvalReason = sanitizeErrorDetails(sandboxApprovalError);
+          const approvalReasonLower = approvalReason.toLowerCase();
+          const verificationRequired =
+            approvalReasonLower.includes('necessary level of verification')
+            || approvalReasonLower.includes('verification');
+          if (verificationRequired) {
+            const buyerCustomerEmail =
+              readEscrowPartyCustomerEmail(input.rawEscrowPayload, 'buyer')
+              || context.buyerEmail
+              || null;
+            const autoVerificationBlockMessage =
+              `${ESCROW_SANDBOX_VERIFICATION_REQUIRED_MESSAGE} `
+              + 'Configure sandbox buyer credentials and rerun to auto-approve verification.';
+
+            if (!buyerCustomerEmail) {
+              sandboxFunding = {
+                attempted: true,
+                succeeded: false,
+                paymentMethod: 'wire_transfer',
+                reason: approvalReason,
+              };
+              sandboxVerification = {
+                attempted: true,
+                succeeded: false,
+                role: 'buyer',
+                customerEmail: null,
+                customerId: null,
+                submissionId: null,
+                reason: 'Missing buyer email on Escrow transaction payload.',
+                credentialsSource: null,
+              };
+              return sendJson(res, 200, {
+                data: {
+                  ...basePayload,
+                  landingPage: null,
+                  paymentReady: false,
+                  paymentBlockedReason: autoVerificationBlockMessage,
+                  paymentBlockedCode: 'VERIFICATION_REQUIRED',
+                  sandboxFunding,
+                  sandboxVerification,
+                  sandboxAgreement: agreement,
+                  sandboxNextStep: getEscrowSandboxApprovalGuidance(input.transactionId),
+                },
+              });
+            }
+
+            try {
+              sandboxVerification = await approveEscrowSandboxVerificationViaIntegrationHelper({
+                role: 'buyer',
+                customerEmail: buyerCustomerEmail,
+              });
+            } catch (sandboxVerificationError) {
+              const verificationReason = sanitizeErrorDetails(sandboxVerificationError);
+              sandboxFunding = {
+                attempted: true,
+                succeeded: false,
+                paymentMethod: 'wire_transfer',
+                reason: approvalReason,
+              };
+              sandboxVerification = {
+                attempted: true,
+                succeeded: false,
+                role: 'buyer',
+                customerEmail: buyerCustomerEmail,
+                customerId: null,
+                submissionId: null,
+                reason: verificationReason,
+                credentialsSource: null,
+              };
+              return sendJson(res, 200, {
+                data: {
+                  ...basePayload,
+                  landingPage: null,
+                  paymentReady: false,
+                  paymentBlockedReason: `${autoVerificationBlockMessage} ${verificationReason}`.trim(),
+                  paymentBlockedCode: 'VERIFICATION_REQUIRED',
+                  sandboxFunding,
+                  sandboxVerification,
+                  sandboxAgreement: agreement,
+                  sandboxNextStep: getEscrowSandboxApprovalGuidance(input.transactionId),
+                },
+              });
+            }
+
+            try {
+              await approveEscrowSandboxPaymentViaIntegrationHelper({
+                transactionId: input.transactionId,
+                amountUsd: approvalAmountUsd,
+                method: 'wire_transfer',
+              });
+              sandboxFunding = {
+                attempted: true,
+                succeeded: true,
+                paymentMethod: 'wire_transfer',
+                reason: sandboxVerification.attempted ? 'verification_auto_approved' : 'already_verified',
+              };
+              effectiveLandingPage = transactionPortalUrl;
+            } catch (sandboxApprovalRetryError) {
+              const retryReason = sanitizeErrorDetails(sandboxApprovalRetryError);
+              const retryReasonLower = retryReason.toLowerCase();
+              const retryStillVerification =
+                retryReasonLower.includes('necessary level of verification')
+                || retryReasonLower.includes('verification');
+              sandboxFunding = {
+                attempted: true,
+                succeeded: false,
+                paymentMethod: 'wire_transfer',
+                reason: retryReason,
+              };
+              return sendJson(res, 200, {
+                data: {
+                  ...basePayload,
+                  landingPage: null,
+                  paymentReady: false,
+                  paymentBlockedReason: retryStillVerification
+                    ? `${autoVerificationBlockMessage} ${retryReason}`.trim()
+                    : `Escrow sandbox payment approval failed. ${retryReason}`,
+                  paymentBlockedCode: retryStillVerification ? 'VERIFICATION_REQUIRED' : 'SANDBOX_FUNDING_FAILED',
+                  sandboxFunding,
+                  sandboxVerification,
+                  sandboxAgreement: agreement,
+                  sandboxNextStep: getEscrowSandboxApprovalGuidance(input.transactionId),
+                },
+              });
+            }
+          } else {
+            sandboxFunding = {
+              attempted: true,
+              succeeded: false,
+              paymentMethod: 'wire_transfer',
+              reason: approvalReason,
+            };
+            return sendJson(res, 200, {
+              data: {
+                ...basePayload,
+                landingPage: null,
+                paymentReady: false,
+                paymentBlockedReason: `Escrow sandbox payment approval failed. ${approvalReason}`,
+                paymentBlockedCode: 'SANDBOX_FUNDING_FAILED',
+                sandboxFunding,
+                sandboxVerification,
+                sandboxAgreement: agreement,
+                sandboxNextStep: getEscrowSandboxApprovalGuidance(input.transactionId),
+              },
+            });
+          }
+        }
+      }
+
+      return sendJson(res, input.statusCode, {
+        data: {
+          ...basePayload,
+          landingPage: effectiveLandingPage,
+          sandboxFunding,
+          sandboxVerification,
+          sandboxAgreement: agreement,
+          sandboxNextStep: isSandbox ? getEscrowSandboxApprovalGuidance(input.transactionId) : null,
+        },
+      });
+    };
+
     if (transactionAlreadyExists) {
+      const existingTransactionId = String(context.escrowTransactionId ?? '').trim();
       let landingPage: string | null = null;
       let nextEscrowStatus: string | null = context.escrowStatus ?? null;
-      let transactionPortalUrl: string | null = getEscrowTransactionPortalUrl(context.escrowTransactionId ?? '');
+      let transactionPortalUrl: string | null = getEscrowTransactionPortalUrl(existingTransactionId);
+      let resolvedTransactionId = existingTransactionId;
+      let existingPaymentDiagnostics: EscrowPaymentDiagnostics | null = null;
+      let existingRawPayload: any = null;
+      let shouldRecreateTransaction = false;
+      let lookupFailedReason: string | null = null;
 
       try {
-        const escrowSnapshot = await fetchEscrowTransaction(context.escrowTransactionId);
+        const escrowSnapshot = await fetchEscrowTransaction(existingTransactionId);
         landingPage = escrowSnapshot.buyerLandingPage ?? null;
         transactionPortalUrl = escrowSnapshot.transactionPortalUrl ?? transactionPortalUrl;
         nextEscrowStatus = escrowSnapshot.escrowStatus ?? nextEscrowStatus;
+        resolvedTransactionId = String(escrowSnapshot.transactionId ?? resolvedTransactionId).trim() || resolvedTransactionId;
+        existingPaymentDiagnostics = escrowSnapshot.paymentDiagnostics ?? null;
+        existingRawPayload = escrowSnapshot.raw ?? null;
+        const snapshotItems = Array.isArray(escrowSnapshot.raw?.items)
+          ? escrowSnapshot.raw.items
+          : Array.isArray(escrowSnapshot.raw?.transaction?.items)
+            ? escrowSnapshot.raw.transaction.items
+            : Array.isArray(escrowSnapshot.raw?.data?.items)
+              ? escrowSnapshot.raw.data.items
+              : [];
+        shouldRecreateTransaction =
+          snapshotItems.length > 0
+          && !(Number(escrowSnapshot.paymentDiagnostics?.payableAmount ?? 0) > 0);
         await persistEscrowStateForContext({
           supabase,
           context,
-          escrowTransactionId: escrowSnapshot.transactionId,
+          escrowTransactionId: resolvedTransactionId,
           escrowStatus: nextEscrowStatus,
         });
-      } catch {
-        // Keep request resilient if Escrow lookup is temporarily unavailable.
+      } catch (snapshotError) {
+        lookupFailedReason = sanitizeErrorDetails(snapshotError);
       }
 
-      const refreshed = await resolveDealRoomContext(supabase, offerId);
-      return sendJson(res, 200, {
-        data: {
-          transactionId: context.escrowTransactionId,
-          escrowStatus: nextEscrowStatus,
-          landingPage: landingPage ?? transactionPortalUrl,
-          transactionPortalUrl,
-          existingTransaction: true,
-          ...(refreshed ? dealRoomResponse(refreshed, user.id) : {}),
-        },
+      if (shouldRecreateTransaction) {
+        const recreatedEscrow = await createAndPersistEscrow();
+
+        await writeMarketplaceAuditLog({
+          actorUserId: user.id,
+          assetId: context.assetId,
+          action: 'deal_room_escrow_recreated',
+          severity: 'WARN',
+          reason: 'ESCROW_RECREATED_ZERO_TOTAL',
+          metadata: {
+            offer_id: context.legacyOfferId,
+            domain_offer_id: context.domainOffer?.id ?? null,
+            previous_escrow_transaction_id: resolvedTransactionId || existingTransactionId || null,
+            escrow_transaction_id: recreatedEscrow.transactionId,
+            escrow_status: recreatedEscrow.escrowStatus,
+            agreed_price_usd: agreedPriceUsd,
+          },
+        });
+
+        const recreatedPortalUrl = recreatedEscrow.transactionPortalUrl
+          ?? getEscrowTransactionPortalUrl(recreatedEscrow.transactionId);
+        return await respondWithEscrowState({
+          statusCode: 201,
+          transactionId: recreatedEscrow.transactionId,
+          escrowStatus: recreatedEscrow.escrowStatus,
+          landingPage: recreatedEscrow.buyerLandingPage ?? recreatedPortalUrl,
+          transactionPortalUrl: recreatedPortalUrl,
+          existingTransaction: false,
+          replacedTransactionId: resolvedTransactionId || existingTransactionId || null,
+          paymentDiagnostics: recreatedEscrow.paymentDiagnostics ?? null,
+          rawEscrowPayload: recreatedEscrow.raw ?? null,
+        });
+      }
+
+      if (!existingPaymentDiagnostics) {
+        existingPaymentDiagnostics = buildFallbackDiagnostics(
+          resolvedTransactionId || existingTransactionId || null,
+          lookupFailedReason ? `validation_unavailable:${lookupFailedReason}` : 'validation_unavailable',
+        );
+      }
+
+      return await respondWithEscrowState({
+        statusCode: 200,
+        transactionId: resolvedTransactionId || existingTransactionId,
+        escrowStatus: nextEscrowStatus,
+        landingPage: landingPage ?? transactionPortalUrl,
+        transactionPortalUrl,
+        existingTransaction: true,
+        paymentDiagnostics: existingPaymentDiagnostics,
+        rawEscrowPayload: existingRawPayload,
       });
     }
 
-    const escrowCreateResult = await createEscrowTransaction({
-      description: `VibeJam Acquisition: ${safeAssetTitle}`,
-      title: safeAssetTitle,
-      itemDescription: `Full transfer of source code, domains, and IP for ${safeAssetTitle}`,
-      priceUsd: agreedPriceUsd,
-      buyerEmail: context.buyerEmail,
-      sellerEmail: context.sellerEmail,
-    });
-
-    await persistEscrowStateForContext({
-      supabase,
-      context,
-      escrowTransactionId: escrowCreateResult.transactionId,
-      escrowStatus: escrowCreateResult.escrowStatus,
-    });
+    const escrowCreateResult = await createAndPersistEscrow();
 
     await writeMarketplaceAuditLog({
       actorUserId: user.id,
@@ -1187,19 +1986,17 @@ const handlePostDealRoomEscrow = async (req: any, res: any) => {
       },
     });
 
-    const refreshed = await resolveDealRoomContext(supabase, offerId);
-    const transactionPortalUrl =
-      escrowCreateResult.transactionPortalUrl
+    const transactionPortalUrl = escrowCreateResult.transactionPortalUrl
       ?? getEscrowTransactionPortalUrl(escrowCreateResult.transactionId);
-    return sendJson(res, 201, {
-      data: {
-        transactionId: escrowCreateResult.transactionId,
-        escrowStatus: escrowCreateResult.escrowStatus,
-        landingPage: escrowCreateResult.buyerLandingPage ?? transactionPortalUrl,
-        transactionPortalUrl,
-        existingTransaction: false,
-        ...(refreshed ? dealRoomResponse(refreshed, user.id) : {}),
-      },
+    return await respondWithEscrowState({
+      statusCode: 201,
+      transactionId: escrowCreateResult.transactionId,
+      escrowStatus: escrowCreateResult.escrowStatus,
+      landingPage: escrowCreateResult.buyerLandingPage ?? transactionPortalUrl,
+      transactionPortalUrl,
+      existingTransaction: false,
+      paymentDiagnostics: escrowCreateResult.paymentDiagnostics ?? null,
+      rawEscrowPayload: escrowCreateResult.raw ?? null,
     });
   } catch (error) {
     const detail = sanitizeErrorDetails(error);

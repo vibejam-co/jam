@@ -32,6 +32,9 @@ const ACTIVE_SELECT = [
   'profit_margin_pct',
   'mrr_cents',
   'profit_margin_bps',
+  'churn_bps',
+  'monthly_unique_visitors',
+  'category',
   'verified_status',
   'last30d_growth_bps',
   'visibility',
@@ -156,6 +159,19 @@ const toNonNegativeInt = (value: unknown): number => {
   return Math.max(0, Math.round(numeric));
 };
 
+const toNullableNonNegativeInt = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return Math.max(0, Math.round(numeric));
+};
+
+const normalizeToken = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+
 const isUniqueViolation = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') {
     return false;
@@ -172,6 +188,10 @@ const notifyMatchingBuyerAlerts = async (input: {
   const mrrCents = toNonNegativeInt(input.asset?.mrr_cents);
   const askingPriceCents = toNonNegativeInt(input.asset?.asking_price_cents);
   const profitMarginBps = toNonNegativeInt(input.asset?.profit_margin_bps);
+  const monthlyTraffic = toNullableNonNegativeInt(input.asset?.monthly_unique_visitors) ?? 0;
+  const churnBps = toNullableNonNegativeInt(input.asset?.churn_bps);
+  const category = normalizeToken(input.asset?.category);
+  const isVerified = normalizeToken(input.asset?.verified_status) === 'verified';
   const visibility = String(input.asset?.visibility ?? '').toLowerCase();
 
   if (visibility === 'private') {
@@ -180,7 +200,7 @@ const notifyMatchingBuyerAlerts = async (input: {
 
   const { data: matchedAlerts, error: alertError } = await input.supabase
     .from('buyer_alerts')
-    .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps')
+    .select('id,email,min_mrr_cents,max_price_cents,min_profit_margin_bps,category,verified_only,max_churn_bps,min_traffic')
     .lte('min_mrr_cents', mrrCents)
     .lte('min_profit_margin_bps', profitMarginBps)
     .or(`max_price_cents.is.null,max_price_cents.gte.${askingPriceCents}`);
@@ -192,7 +212,30 @@ const notifyMatchingBuyerAlerts = async (input: {
     throw alertError;
   }
 
-  const alerts = Array.isArray(matchedAlerts) ? matchedAlerts : [];
+  const alerts = (Array.isArray(matchedAlerts) ? matchedAlerts : []).filter((row) => {
+    const requiredCategory = normalizeToken(row?.category);
+    if (requiredCategory && requiredCategory !== category) {
+      return false;
+    }
+
+    if (row?.verified_only === true && !isVerified) {
+      return false;
+    }
+
+    const requiredMaxChurn = toNullableNonNegativeInt(row?.max_churn_bps);
+    if (requiredMaxChurn !== null) {
+      if (churnBps === null || churnBps > requiredMaxChurn) {
+        return false;
+      }
+    }
+
+    const requiredMinTraffic = toNullableNonNegativeInt(row?.min_traffic);
+    if (requiredMinTraffic !== null && monthlyTraffic < requiredMinTraffic) {
+      return false;
+    }
+
+    return true;
+  });
   if (alerts.length === 0) {
     return;
   }
@@ -239,16 +282,20 @@ const notifyMatchingBuyerAlerts = async (input: {
     actorUserId: null,
     assetId: input.assetId,
     action: 'buyer_alerts_notified',
-    metadata: {
-      matched_alerts: alerts.length,
-      recipient_count: uniqueRecipients.size,
-      sent_count: sentCount,
-      skipped_count: skippedCount,
-      failed_count: failedCount,
-      mrr_cents: mrrCents,
-      asking_price_cents: askingPriceCents,
-      profit_margin_bps: profitMarginBps,
-    },
+      metadata: {
+        matched_alerts: alerts.length,
+        recipient_count: uniqueRecipients.size,
+        sent_count: sentCount,
+        skipped_count: skippedCount,
+        failed_count: failedCount,
+        mrr_cents: mrrCents,
+        asking_price_cents: askingPriceCents,
+        profit_margin_bps: profitMarginBps,
+        category,
+        verified_status: input.asset?.verified_status ?? null,
+        monthly_unique_visitors: monthlyTraffic,
+        churn_bps: churnBps,
+      },
   });
 };
 

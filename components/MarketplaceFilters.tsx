@@ -1,5 +1,5 @@
-import React from 'react';
-import { BellRing, Filter, SlidersHorizontal, TrendingUp, Users, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { BellRing, ChevronDown, Filter, SlidersHorizontal, TrendingUp, Users, X } from 'lucide-react';
 
 export type MarketplaceSortMode = 'latest' | 'mrr' | 'rev30' | 'multiple';
 export type ChurnFilterOption = 'any' | 'lt5' | 'lt10' | 'lt20';
@@ -49,6 +49,41 @@ const sortOptions: Array<{ value: MarketplaceSortMode; label: string }> = [
   { value: 'multiple', label: 'Lowest Multiple' },
 ];
 
+const normalizeCategoryToken = (value: string): string => value.trim().toLowerCase();
+
+const EXPLORE_CATEGORIES = [
+  'Ai',
+  'Analytics',
+  'Community',
+  'Content Creation',
+  'Crypto',
+  'Customer Support',
+  'Design Tools',
+  'Developer Tools',
+  'Ecommerce',
+  'Education',
+  'Entertainment',
+  'Fintech',
+  'Games',
+  'Health',
+  'IoT',
+  'Legal',
+  'Marketing',
+  'Marketplace',
+  'Mobile Apps',
+  'News & Magazines',
+  'No-Code',
+  'Productivity',
+  'Real Estate',
+  'Recruiting & HR',
+  'SaaS',
+  'Sales',
+  'Security',
+  'Social Media',
+  'Travel',
+  'Utilities',
+];
+
 const MarketplaceFilters: React.FC<MarketplaceFiltersProps> = ({
   categories,
   category,
@@ -73,6 +108,47 @@ const MarketplaceFilters: React.FC<MarketplaceFiltersProps> = ({
   activePills,
   onResetAll,
 }) => {
+  const [isExploreOpen, setIsExploreOpen] = useState(false);
+  const exploreRef = useRef<HTMLDivElement | null>(null);
+  const categoryOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...EXPLORE_CATEGORIES, ...categories]
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0 && normalizeCategoryToken(item) !== 'all'),
+        ),
+      ),
+    [categories],
+  );
+  const saasCategory = useMemo(
+    () => categoryOptions.find((item) => normalizeCategoryToken(item) === 'saas') ?? 'SaaS',
+    [categoryOptions],
+  );
+  const isAllSelected = normalizeCategoryToken(category) === 'all';
+  const isSaasSelected = normalizeCategoryToken(category) === normalizeCategoryToken(saasCategory);
+  const isExploreSelected = !isAllSelected && !isSaasSelected;
+
+  useEffect(() => {
+    if (!isExploreOpen) {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!exploreRef.current) {
+        return;
+      }
+      if (!exploreRef.current.contains(event.target as Node)) {
+        setIsExploreOpen(false);
+      }
+    };
+
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isExploreOpen]);
+
   return (
     <section className="rounded-3xl border border-white/10 bg-white/[0.02] px-4 py-4 sm:px-6 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
@@ -103,20 +179,71 @@ const MarketplaceFilters: React.FC<MarketplaceFiltersProps> = ({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {categories.slice(0, 8).map((item) => (
+        <button
+          type="button"
+          onClick={() => onCategoryChange('All')}
+          className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${
+            isAllSelected
+              ? 'bg-white text-black border-white'
+              : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/25'
+          }`}
+        >
+          All
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onCategoryChange(saasCategory)}
+          className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${
+            isSaasSelected
+              ? 'bg-white text-black border-white'
+              : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/25'
+          }`}
+        >
+          SaaS
+        </button>
+
+        <div ref={exploreRef} className="relative">
           <button
-            key={item}
             type="button"
-            onClick={() => onCategoryChange(item)}
-            className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all ${
-              category === item
+            onClick={() => setIsExploreOpen((prev) => !prev)}
+            className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all inline-flex items-center gap-1.5 ${
+              isExploreSelected || isExploreOpen
                 ? 'bg-white text-black border-white'
                 : 'bg-transparent text-zinc-500 border-white/10 hover:border-white/25'
             }`}
           >
-            {item}
+            Explore
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExploreOpen ? 'rotate-180' : ''}`} />
           </button>
-        ))}
+
+          {isExploreOpen && (
+            <div className="absolute left-0 top-[calc(100%+8px)] z-30 min-w-[180px] rounded-2xl border border-white/10 bg-[#0B0B0B] p-2 shadow-[0_12px_40px_rgba(0,0,0,0.5)]">
+              <div className="max-h-64 overflow-auto pr-1 space-y-1">
+                {categoryOptions.map((item) => {
+                  const isItemSelected = normalizeCategoryToken(category) === normalizeCategoryToken(item);
+                  return (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => {
+                        onCategoryChange(item);
+                        setIsExploreOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                        isItemSelected
+                          ? 'bg-cyan-500/20 text-cyan-100 border border-cyan-400/40'
+                          : 'text-zinc-300 hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
 
         <button
           type="button"
